@@ -1,0 +1,48 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+*.ipynb_checkpoints/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.env
+
+# Data Files (Keep large raw/processed files out of git, allow 50-row sample)
+data/raw/*
+!data/raw/sample_50_dramas.csv
+data/processed/*
+!data/processed/.gitkeep
+
+# Web Scraper Outputs & Logs
+mdl_scraper/*.csv
+mdl_scraper/*.jsonl
+mdl_scraper/*.log
+mdl_scraper/crawl_state_*
+
+# Trained Models, Embeddings & Vector Stores
+models/*
+!models/.gitkeep
+*.joblib
+*.pkl
+*.pt
+*.bin
+*.onnx
+vector_db/
+chroma_db/
+faiss_index/
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
