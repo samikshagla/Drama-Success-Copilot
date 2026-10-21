@@ -1,4 +1,4 @@
-﻿# Drama Success Copilot 🎬
+# Drama Success Copilot 🎬
 
 An end-to-end AI/GenAI decision support system designed to predict whether an Asian drama concept (Korean, Chinese, Japanese, Thai) is likely to succeed, explain the key drivers behind the prediction, and generate actionable greenlight recommendations for production teams.
 
@@ -47,6 +47,27 @@ asian_dramas/
 - **Coverage:** Korean, Chinese, Japanese, and Thai dramas.
 - **Scale:** 10,400 drama titles with 20 raw attributes capturing metadata, audience metrics, content tags, genres, and cast composition.
 - **Storage Policy:** Large raw files (`>15MB`) and scraper state files are safely excluded from version control via `.gitignore`. A 50-row sample (`data/raw/sample_50_dramas.csv`) is versioned for local smoke tests.
+
+### ⚠️ Data Limitations & Coverage Gaps (Provenance Audit)
+An audit of the scraper code (`mdl_scraper/`) revealed specific temporal coverage gaps that dictate our modeling decisions:
+- **Ascending Date Pagination:** MyDramaList's `so=date` search parameter sorts **chronologically ascending (oldest-to-newest)**. Each country was scraped with a hard cap of 65 pages (1,300 titles) across two runs (`2015–2026` and `2021–2026`).
+- **High-Volume Country Truncation & Partial Years:**
+  - **China:** Covers 2015–2018, 14 dramas in 2019, and 2021–2022. It stops in **October 2022** (0 dramas in 2020 or 2023–2026).
+  - **Japan:** Covers 2015–2017 and 2021–mid 2023. It stops in **July 2023** (0 dramas in 2019–2020 or 2024–2026).
+  - **South Korea:** Spans 2015–mid 2025, but 2020 has only 31 titles (**January–February 2020 only**) due to the crawl cutoff.
+  - **Thailand:** Broadest and most consistent coverage, spanning 2015–mid 2025 (~200–290 titles/year).
+- **Partial Year Warning:** Because coverage is cut off midway through certain years (China 2022 ends ~Oct, Japan 2023 ends ~Jul, Korea 2020 covers only Jan–Feb), **release month and airing season must NOT be used as predictive features without verifying bias**.
+- **Year Consistency:** For all 10,238 titles where both `aired_bw` and a title year `(YYYY)` are present, the two years match in 100% of cases.
+- **Page Edit Bias Warning:** Missing-metadata indicators (such as credit counts) may reflect post-release crowdsourced edits (popular dramas attract more volunteer contributors on MDL). We will benchmark models with and without these missingness features.
+- **RAG Indexing Note:** Titles with empty `synopsis` will be excluded from the semantic vector search / RAG comp retrieval index.
+
+### 🎯 Evaluation & Time-Split Strategy (Decision Log)
+- **Validation Split Scheme:** **Option 1 (Train: $\le$ 2021, Test: $\ge$ 2022)**.
+  - **Train Set:** 6,970 dramas (67.0%) — China 29.0%, Japan 25.6%, South Korea 23.4%, Thailand 22.0%.
+  - **Test Set:** 3,430 dramas (33.0%) — Thailand 31.2%, South Korea 28.3%, Japan 23.8%, China 16.8%.
+  - Ensures all 4 countries are represented in both training and testing, mitigating the risk of `country` acting as an accidental proxy for time.
+- **Reporting Requirement:** Evaluation metrics must be reported **both overall and broken down per country** to detect country-specific performance disparities.
+- **Input Feature Restriction:** `release_year` is strictly reserved for temporal train/test splitting and will **NOT** be fed into the model as an input feature.
 
 ---
 
