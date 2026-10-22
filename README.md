@@ -69,6 +69,44 @@ An audit of the scraper code (`mdl_scraper/`) revealed specific temporal coverag
 - **Reporting Requirement:** Evaluation metrics must be reported **both overall and broken down per country** to detect country-specific performance disparities.
 - **Input Feature Restriction:** `release_year` is strictly reserved for temporal train/test splitting and will **NOT** be fed into the model as an input feature.
 
+### 🛡️ Pre-Release Leakage Audit & Feature Decisions (Step 2D)
+From the standpoint of an executive pitching a drama before filming, all attributes were audited in `notebooks/03_leakage_review.ipynb` and categorized:
+
+- **Valid Pre-Release Candidate Inputs:**
+  - **Production Parameters:** `country`, `original_network`, `episodes` (contracted episode order; *caveat:* MDL records actual aired episodes, so cancelled/shortened shows may have fewer—the Copilot interface will accept the user's planned order), `aired_on` (scheduled day/slot), `content_rating`, `is_short_run` (`episodes <= 4`, pending scope decision in Step 2E).
+  - **Creative Pitch:** `genres` (pitch genres), `synopsis` (concept logline/premise; sampled across 30 random titles showing 0 spoilers/recaps and 0 "Source:" lines, with weak +0.1492 correlation to watchers).
+  - **Attached Talent:** `director`, `screenwriter`, `cast_summary` (talent features must strictly use `[Main Role]` lead actors only).
+
+- **Display / Identifier Only (Excluded from Inputs):**
+  - `name`: Working project title; ends with `"(YYYY)"` which leaks `release_year`. Mark as display/identifier only; any NLP/text use must explicitly strip the `"(YYYY)"` suffix.
+  - `native_title`: Non-English script title; redundant with `name`.
+
+- **Strictly Excluded Post-Release Leakage:**
+  - **Target Variables:** `rating`, `watchers`, `popularity`, `is_unranked`.
+  - **Broadcast & Lifecycle Leakage:** `end_date` (leaks cancellations, run length, or hiatuses), `aired_bw`, `also_known_as`.
+  - **Crowdsourced User Tags (`tags`):** Excluded from input features. Tags reveal mid-to-end plot spoilers (`Death`, `Murder`, `Infidelity`, `Tragic Ending`), and total tag count correlates (+0.3022) with `watchers` due to community engagement bias.
+  - **Format / Audit Flags:** `is_special_or_pilot` (audit-only flag; superseded by `is_short_run`).
+  - **Page Edit Missingness Flags:** `n_missing_credits`, `episodes_was_missing`, `synopsis_was_missing`, `tags_was_missing`, `genres_was_missing`.
+  - **Evaluation Split Variable:** `release_year` is strictly reserved for time splitting.
+
+- **Quantifying the "Unknown" Leakage (Page Completeness Bias):**
+  Presence of `"Unknown"` or `"Not Yet Rated"` carries a strong post-release page-completeness signal:
+
+  | Field | Value | Unknown Count | Median Watchers (Unk) | Median Rating (Unk) | Known Count | Median Watchers (Known) | Median Rating (Known) |
+  | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+  | `director` | Unknown | 4,653 (44.7%) | 120 | 7.10 | 5,747 (55.3%) | 905 | 7.50 |
+  | `screenwriter` | Unknown | 5,490 (52.8%) | 147 | 7.20 | 4,910 (47.2%) | 1,054 | 7.50 |
+  | `original_network` | Unknown | 2,060 (19.8%) | 133 | 7.00 | 8,340 (80.2%) | 461 | 7.40 |
+  | `aired_on` | Unknown | 2,233 (21.5%) | 67 | 7.10 | 8,167 (78.5%) | 562 | 7.40 |
+  | `cast_summary` | Unknown | 637 (6.1%) | 25 | 6.80 | 9,763 (93.9%) | 386 | 7.40 |
+  | `content_rating` | Not Yet Rated | 6,541 (62.9%) | 164 | 7.30 | 3,859 (37.1%) | 2,118 | 7.50 |
+
+  *Implication & Modeling Plan:* Obscure dramas are left unedited by the community. These values carry the same page-completeness signal as the missingness flags we excluded. **Milestone 4 will explicitly benchmark models trained with "Unknown" kept versus masked/regularized.**
+
+- **Temporal Prior Engineering Rules & Scraper Limitations:**
+  - Talent track records (actor hit rates, director averages) must use an **expanding historical window** restricted to titles released **strictly before** the drama's premiere date ($\text{release\_date}_{\text{prior}} < \text{release\_date}_{\text{current}}$). Global dataset-wide aggregations are strictly prohibited.
+  - *Data Limitation:* Because of scraper temporal gaps (China 2019–2020 and 2023+, Japan 2019–2020 and 2024+), talent track-record priors will be computed from an incomplete historical corpus and must be treated as proxy estimates.
+
 ---
 
 ## ⚙️ Setup & Installation
@@ -117,7 +155,7 @@ data/raw/dramas_raw.csv
 - [ ] **Milestone 2:** Exploratory Data Analysis (EDA), missing value strategy, and data leakage audit.
   - [x] **Steps 2A & 2B:** Data sanity checks, date parsing, and provenance audit (scraping gaps, ascending pagination analysis, and time-split design).
   - [x] **Step 2C:** Data cleaning, leakage-safe exclusions, pilot/special flagging, and credit count indicators (`notebooks/02_cleaning.ipynb`).
-  - [ ] **Step 2D:** Leakage review (column classification, pre/post-release analysis of tags, cast, crew, synopsis, and temporal track-record rules).
+  - [x] **Step 2D:** Leakage review (column classification, pre/post-release analysis of tags, cast, crew, synopsis, and temporal track-record rules; `notebooks/03_leakage_review.ipynb`).
   - [ ] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection.
 - [ ] **Milestone 3:** Target variable definition and leakage-free feature engineering.
 - [ ] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
