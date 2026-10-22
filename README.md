@@ -107,6 +107,43 @@ From the standpoint of an executive pitching a drama before filming, all attribu
   - Talent track records (actor hit rates, director averages) must use an **expanding historical window** restricted to titles released **strictly before** the drama's premiere date ($\text{release\_date}_{\text{prior}} < \text{release\_date}_{\text{current}}$). Global dataset-wide aggregations are strictly prohibited.
   - *Data Limitation:* Because of scraper temporal gaps (China 2019–2020 and 2023+, Japan 2019–2020 and 2024+), talent track-record priors will be computed from an incomplete historical corpus and must be treated as proxy estimates.
 
+### 🎯 Target Definition & Dataset Scope (Step 2E)
+Formally established in `notebooks/04_target_and_scope.ipynb` and persisted to `data/processed/dramas_labeled.csv`:
+
+- **Target Metric (Relative MDL Audience Reach):**
+  - **Definition:** Percentile rank of `watchers` calculated within each `(country, release_year)` cohort (`target_pct`).
+  - **Decision Tiers (`target_tier`):**
+    - **High (Top 25%):** $\text{target\_pct} \ge 0.75$ *(Commercial hit relative to country-year peers)*
+    - **Medium (Middle 50%):** $0.25 \le \text{target\_pct} < 0.75$ *(Moderate mainstream performance)*
+    - **Low (Bottom 25%):** $\text{target\_pct} < 0.25$ *(Underperforming relative to country-year peers)*
+  - *Construction Property:* The 25% High, 50% Medium, 25% Low class distribution holds **by construction** across all countries, years, and train/test splits.
+  - *Core Limitation:* The target specifically measures **relative audience reach on MyDramaList**. It is not a proxy for domestic broadcast TV ratings, production profitability, or critical acclaim.
+
+- **Dataset Scope (Minimum 6 Episodes):**
+  - Applied **before** computing percentiles. Eliminates short-run web series, pilots, and specials ($< 6$ episodes), and drops 18 rows with missing episode counts (2,784 titles removed).
+
+- **Small-Cohort Exclusion Rule (< 50 Dramas):**
+  - Any cohort containing fewer than 50 dramas after the scope filter is excluded to prevent noisy ranking thresholds:
+    - `China 2019`: 13 titles
+    - `Japan 2018`: 47 titles
+    - `South Korea 2020`: 21 titles (Jan–Feb only)
+  - *Removed by small-cohort rule:* 81 titles.
+  - **Final Scoped & Labeled Dataset:** **7,535 dramas** (Train $\le 2021$: 5,010; Test $\ge 2022$: 2,525).
+  - All retained cohorts contain at least 118 dramas (zero cohorts between 50 and 100).
+  - *Truncated Cohort Limitation:* Due to scraper cutoffs, `China 2022` (ends ~October) and `Japan 2023` (ends ~July) are truncated cohorts covering only earlier-airing titles in those years.
+
+- **Evaluation Plan (Milestone 4):**
+  - **Metrics:** Report overall accuracy, **macro-F1**, and **balanced accuracy** across the 3 tiers (High, Medium, Low), as well as a binary **"High vs. not High"** secondary view.
+  - **Dual Test Evaluation:** Models will be evaluated on both:
+    1. **Full Test Set** ($N = 2,525$).
+    2. **`complete_info` Subset** ($N = 1,022$ test dramas where director, writer, network, and cast are all listed):
+       - *Test breakdown by country:* South Korea: 336 (44.7%), Thailand: 344 (43.5%), Japan: 241 (53.3%), China: 101 (19.0%).
+       - *(Overall dataset complete_info counts:* South Korea: 934 / 48.8%, Thailand: 816 / 42.7%, Japan: 759 / 60.5%, China: 535 / 21.8%; total $N = 3,044$).
+  - **Country Breakdown:** All metrics will be reported overall and broken down per country.
+  - **Baselines:**
+    1. **Majority-Class Baseline:** Predict "Medium" for all titles (**50.0% accuracy**).
+    2. **Metadata-Presence Baseline:** An ablation model trained using *only* the Unknown-signals (director, screenwriter, network, cast listed or not) to isolate how much predictive signal is driven by page-completeness bias alone.
+
 ---
 
 ## ⚙️ Setup & Installation
@@ -152,12 +189,12 @@ data/raw/dramas_raw.csv
 
 ## 🚀 Project Milestones
 - [x] **Milestone 1:** Repository architecture setup, git hygiene, environment verification, and raw data schema inspection.
-- [ ] **Milestone 2:** Exploratory Data Analysis (EDA), missing value strategy, and data leakage audit.
+- [x] **Milestone 2:** Exploratory Data Analysis (EDA), missing value strategy, and data leakage audit.
   - [x] **Steps 2A & 2B:** Data sanity checks, date parsing, and provenance audit (scraping gaps, ascending pagination analysis, and time-split design).
   - [x] **Step 2C:** Data cleaning, leakage-safe exclusions, pilot/special flagging, and credit count indicators (`notebooks/02_cleaning.ipynb`).
   - [x] **Step 2D:** Leakage review (column classification, pre/post-release analysis of tags, cast, crew, synopsis, and temporal track-record rules; `notebooks/03_leakage_review.ipynb`).
-  - [ ] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection.
-- [ ] **Milestone 3:** Target variable definition and leakage-free feature engineering.
+  - [x] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection (`notebooks/04_target_and_scope.ipynb`).
+- [ ] **Milestone 3:** Leakage-free feature engineering.
 - [ ] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
 - [ ] **Milestone 5:** Model interpretability with SHAP.
 - [ ] **Milestone 6:** RAG retriever for comparable dramas.
