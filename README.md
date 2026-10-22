@@ -73,7 +73,7 @@ An audit of the scraper code (`mdl_scraper/`) revealed specific temporal coverag
 From the standpoint of an executive pitching a drama before filming, all attributes were audited in `notebooks/03_leakage_review.ipynb` and categorized:
 
 - **Valid Pre-Release Candidate Inputs:**
-  - **Production Parameters:** `country`, `original_network`, `episodes` (contracted episode order; *caveat:* MDL records actual aired episodes, so cancelled/shortened shows may have fewer—the Copilot interface will accept the user's planned order), `aired_on` (scheduled day/slot), `content_rating`, `is_short_run` (`episodes <= 4`, pending scope decision in Step 2E).
+  - **Production Parameters:** `country`, `original_network` (*note: network is a strong proxy for country*), `episodes` (contracted episode order; *caveat:* MDL records actual aired episodes, so cancelled/shortened shows may have fewer—the Copilot interface will accept the user's planned order), `aired_on` (scheduled day/slot), `content_rating` (*note: "Not Yet Rated" is a placeholder for 62.6% of train dramas and is isolated in the missingness group; the 3 rare "R" ratings are merged into 18+*).
   - **Creative Pitch:** `genres` (pitch genres), `synopsis` (concept logline/premise; sampled across 30 random titles showing 0 spoilers/recaps and 0 "Source:" lines, with weak +0.1492 correlation to watchers).
   - **Attached Talent:** `director`, `screenwriter`, `cast_summary` (talent features must strictly use `[Main Role]` lead actors only).
 
@@ -84,8 +84,8 @@ From the standpoint of an executive pitching a drama before filming, all attribu
 - **Strictly Excluded Post-Release Leakage:**
   - **Target Variables:** `rating`, `watchers`, `popularity`, `is_unranked`.
   - **Broadcast & Lifecycle Leakage:** `end_date` (leaks cancellations, run length, or hiatuses), `aired_bw`, `also_known_as`.
-  - **Crowdsourced User Tags (`tags`):** Excluded from input features. Tags reveal mid-to-end plot spoilers (`Death`, `Murder`, `Infidelity`, `Tragic Ending`), and total tag count correlates (+0.3022) with `watchers` due to community engagement bias.
-  - **Format / Audit Flags:** `is_special_or_pilot` (audit-only flag; superseded by `is_short_run`).
+  - **Crowdsourced User Tags (`tags`):** Excluded from input features. Many tags describe plot developments (for example Death, Murder, Infidelity), and the number of tags per drama tracks popularity (r = +0.30), so tags are excluded as inputs.
+  - **Format / Audit Flags:** `is_special_or_pilot` (audit-only flag; superseded by 6+ episode scope cutoff).
   - **Page Edit Missingness Flags:** `n_missing_credits`, `episodes_was_missing`, `synopsis_was_missing`, `tags_was_missing`, `genres_was_missing`.
   - **Evaluation Split Variable:** `release_year` is strictly reserved for time splitting.
 
@@ -137,12 +137,53 @@ Formally established in `notebooks/04_target_and_scope.ipynb` and persisted to `
   - **Dual Test Evaluation:** Models will be evaluated on both:
     1. **Full Test Set** ($N = 2,525$).
     2. **`complete_info` Subset** ($N = 1,022$ test dramas where director, writer, network, and cast are all listed):
-       - *Test breakdown by country:* South Korea: 336 (44.7%), Thailand: 344 (43.5%), Japan: 241 (53.3%), China: 101 (19.0%).
-       - *(Overall dataset complete_info counts:* South Korea: 934 / 48.8%, Thailand: 816 / 42.7%, Japan: 759 / 60.5%, China: 535 / 21.8%; total $N = 3,044$).
+        - *Test breakdown by country:* South Korea: 336 (44.7%), Thailand: 344 (43.5%), Japan: 241 (53.3%), China: 101 (19.0%).
+        - *(Overall dataset complete_info counts:* South Korea: 934 / 48.8%, Thailand: 816 / 42.7%, Japan: 759 / 60.5%, China: 535 / 21.8%; total $N = 3,044$).
   - **Country Breakdown:** All metrics will be reported overall and broken down per country.
   - **Baselines:**
     1. **Majority-Class Baseline:** Predict "Medium" for all titles (**50.0% accuracy**).
     2. **Metadata-Presence Baseline:** An ablation model trained using *only* the Unknown-signals (director, screenwriter, network, cast listed or not) to isolate how much predictive signal is driven by page-completeness bias alone.
+
+### 🛠️ Leakage-Free Feature Engineering (Milestone 3, Steps 1–3)
+Implemented in `src/features.py` and validated in `notebooks/05_feature_engineering.ipynb`:
+
+- **Step 1: Temporal Train/Test Split:**
+  - Cutoff year: 2021. Train: $2015–2021$ ($N = 5,010$, 66.5%); Test: $2022–2025$ ($N = 2,525$, 33.5%).
+  - Non-leakage guarantee: all transformations, vocabularies, groupings, and global shrinkage means are fitted strictly on Train and applied to Test.
+
+- **Step 2: Basic Features (Core vs. Missingness):**
+  - **Core Group ($N = 41$):** `episodes`, `country` (single categorical string; one-hot / categorical encoding deferred to train-only model preprocessor), `original_network` (57 train broadcasters with $\ge 10$ titles + `"Other"`; Unknown maps to `NaN`), `content_rating` (`15+`, `13+`, `G`, `18+`; rare "R" merged into "18+"; "Not Yet Rated" maps to `NaN`), 7 weekday indicators (`aired_on_monday` ... `sunday`; Unknown maps to `NaN`), and 30 multi-hot pitch genres (appearing in $\ge 30$ train titles; Unknown maps to `NaN`).
+  - **Missingness Ablation Group ($N = 4$):** `aired_on_is_missing`, `content_rating_is_missing`, `network_is_missing`, `genre_is_missing`. Isolated from Core so that no combination of core columns encodes missingness except `NaN`.
+
+- **Switchable Feature Groups in `src/features.py`:**
+  - `core` ($N = 41$): Basic pitch-time features (episodes, country, original_network, content_rating, weekdays, multi-hot genres).
+  - `talent_reach` ($N = 6$): Attached talent track-record reach (max/mean prior reach for director, screenwriter, lead cast).
+  - `talent_experience` ($N = 8$): All-time and 5-year prior title counts ($n_{\text{prior}}$) for director, screenwriter, and cast. **Set to OFF by default** (ablation only) because raw experience features heavily track premiere year rather than talent quality.
+  - `missingness` ($N = 4$): Binary indicators for missing metadata (aired_on, content_rating, network, genre). **Set to OFF by default** (reserved for page-completeness bias ablation benchmarking).
+  - Default active modeling features: `DEFAULT_FEATURE_GROUPS = ['core', 'talent_reach']` ($N = 47$).
+
+- **Step 3: Attached Talent Track Records (Expanding-Window Priors):**
+  - **Talent Features ($N = 14$):**
+    - Director: `director_n_prior_max`, `director_n_prior_5yr_max`, `director_prior_reach_max`, `director_prior_reach_mean`.
+    - Screenwriter: `screenwriter_n_prior_max`, `screenwriter_n_prior_5yr_max`, `screenwriter_prior_reach_max`, `screenwriter_prior_reach_mean`.
+    - Lead Cast: `cast_n_prior_max`, `cast_n_prior_5yr_max`, `cast_n_prior_mean`, `cast_n_prior_5yr_mean`, `cast_prior_reach_max`, `cast_prior_reach_mean` (strictly using `[Main Role]` entries; dramas with no `[Main Role]` receive `NaN`).
+  - **Conservative 12-Month Rule:** Only prior dramas satisfying $\text{eff\_pri\_date} \le \text{eff\_cur\_date} - 365\text{ days}$ qualify. If `start_date` is missing, Jan 1 of `release_year` is used for the current drama, and Dec 31 of `release_year` is used for candidate priors.
+  - **Fixed 5-Year Lookback Variant:** The 5-year window ($\text{cutoff} - 5\text{ years} < \text{prior} \le \text{cutoff}$) only equalizes the history length from 2020 onward. In train, 2015–2019 are still left-censored (the 5-year and all-time counts are mathematically identical for those years because the corpus begins in 2015), so the $n_{\text{prior}}$ features still correlate with release year in train (about $+0.40$). Furthermore, 2019–2020 scraper gaps thin out the observable history for 2021 dramas.
+  - **Unknown vs. Debut Distinction:** If a talent credit is `"Unknown"`, all its features are `NaN` (including $n_{\text{prior}}$). If talent is known but has 0 qualifying priors (debut), $n_{\text{prior}} = 0$ and prior reach = `NaN`.
+  - **Empirical Bayes Smoothing:** $\hat{\mu} = \frac{n \cdot \bar{y} + m \cdot \mu_{\text{global}}}{n + m}$ with $\mu_{\text{global}} = 0.5022$ (Train mean). While $m = 1$ achieved slightly higher correlation ($+0.608$ vs. $+0.584$ for cast) and lower RMSE ($0.224$ vs. $0.227$) on 2020–2021 train dramas, $m = 3$ was kept as a conservative hyperparameter choice for stability against extreme singletons (since 52.4% of lead actors in train appear only once).
+  - **Two Test Prior Variants:**
+    - **Variant 1 (V1 — Deployment-Style Evaluation):** Prior pool for test dramas includes Train plus earlier Test dramas ($\le \text{current} - 365\text{ days}$). Evaluates continuous real-world model deployment ($r = +0.59$ for cast reach).
+    - **Variant 2 (V2 — Static Train-Only Benchmark):** Prior pool for test dramas is strictly limited to the Train set ($\le 2021$). Completely passive evaluation benchmark ($r = +0.57$ for cast reach).
+    - Both feature tables are exported to `data/processed/` (`train_features_v1.csv`, `test_features_v1.csv`, `train_features_v2.csv`, `test_features_v2.csv`) and gitignored.
+
+- **Critical Data Limitations & Caveats for Talent Features:**
+  1. **String-Matching Without Person IDs:** Talent names are matched strictly on normalized romanized strings (`lowercase`, stripped parentheses, collapsed whitespace, unaccented). No unique MDL person IDs or URLs exist in this dataset; common romanized names may belong to different real-world individuals (homonym collisions), or split across transliteration variants.
+  2. **Scrape-Time Snapshot Labels & Cumulative Growth:** Track records use `target_pct` computed at scrape time. Although the 12-month rule prevents using concurrent or future titles, prior-drama labels include later popularity growth (snapshot at scrape time), which may inflate talent-reach correlations compared to views known at the exact pitch date.
+  3. **Ablation Nature of Prior Experience ($n_{\text{prior}}$):** Raw experience count ($n_{\text{prior}}$) exhibits weak and unstable correlation with target reach ($r \approx -0.10 \text{ to } +0.13$). Because the corpus starts in 2015, left-censoring causes earlier titles to mechanically have fewer recorded priors, confounding $n_{\text{prior}}$ with premiere year.
+  4. **Reach NaN Patterns & Tree Proxy Risk:** Reach NaN patterns vary significantly with release year (100% in 2015, dropping to 10% in 2020) and country (screenwriter reach is 86.1% NaN in China vs. 55.3% in Thailand). Consequently, a tree model could use reach NaN status as a proxy for premiere time, country, or page completeness rather than true talent quality. Milestone 4 will compare models with and without `talent_reach`, and explore dropping 2015 as a prior-only burn-in year.
+  5. **Non-Comparable Correlations (Sample Selection Skew):** All reported correlations between talent priors and `target_pct` are computed strictly on rows where the feature is not `NaN`. Because rows with non-NaN priors are heavily skewed towards popular, well-documented dramas with established industry talent, these correlations are not comparable with correlations evaluated on the full dataset.
+  6. **Inherent Missingness Signal in Talent Credits:** ~60% of dramas lack complete credits (`complete_info == 0`). Incomplete titles have 87%–93% missingness in director/screenwriter priors and 55% in cast priors, meaning talent features inherently carry page-completeness signal.
+  7. **Incomplete Historical Corpus:** Due to scraper temporal gaps (China 2019–2020, Japan 2018–2020), priors come from an incomplete historical sample and serve as proxy estimates.
 
 ---
 
