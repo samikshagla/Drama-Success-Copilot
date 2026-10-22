@@ -27,7 +27,7 @@ The project is built iteratively across 6 core pillars:
 
 ## 📁 Repository Structure
 ```text
-asian_dramas/
+Drama-Success-Copilot/
 ├── data/
 │   ├── raw/                 # Scraped raw datasets (full data ignored by git)
 │   │   └── sample_50_dramas.csv  # 50-row sample tracked for reproducibility
@@ -71,12 +71,58 @@ An audit of the scraper code (`mdl_scraper/`) revealed specific temporal coverag
 
 ---
 
+## ⚙️ Setup & Installation
+
+### 1. Environment Setup
+Clone the repository and set up a Python 3.11 virtual environment:
+```bash
+# Clone the repository
+git clone https://github.com/samikshagla/Drama-Success-Copilot.git
+cd Drama-Success-Copilot
+
+# Create virtual environment with Python 3.11
+python -m venv venv
+
+# Activate virtual environment
+# Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+# Linux/macOS:
+source venv/bin/activate
+
+# Install core data science dependencies
+python -m pip install -r requirements.txt
+```
+
+*(Note: Scraper dependencies are archived separately in `mdl_scraper/requirements-scraper.txt`.)*
+
+### 2. Jupyter Kernel Registration
+Register the virtual environment as an ipykernel:
+```bash
+python -m ipykernel install --user --name drama-success-copilot --display-name "Python (Drama Success Copilot)"
+```
+In Jupyter Notebook or VS Code, select **`Python (Drama Success Copilot)`** from the kernel picker at the top right.
+
+### 3. Data File Placement
+The full scraped dataset (`dramas_raw.csv`, ~15.35 MB) is excluded from version control to maintain clean repository hygiene.
+Place the raw data file directly in:
+```
+data/raw/dramas_raw.csv
+```
+*(A 50-row smoke-test sample `data/raw/sample_50_dramas.csv` is tracked in the repository for quick testing and pipeline verification.)*
+
+---
+
 ## 🚀 Project Milestones
 - [x] **Milestone 1:** Repository architecture setup, git hygiene, environment verification, and raw data schema inspection.
 - [ ] **Milestone 2:** Exploratory Data Analysis (EDA), missing value strategy, and data leakage audit.
+  - [x] **Steps 2A & 2B:** Data sanity checks, date parsing, and provenance audit (scraping gaps, ascending pagination analysis, and time-split design).
+  - [x] **Step 2C:** Data cleaning, leakage-safe exclusions, pilot/special flagging, and credit count indicators (`notebooks/02_cleaning.ipynb`).
+  - [ ] **Step 2D:** Leakage review (column classification, pre/post-release analysis of tags, cast, crew, synopsis, and temporal track-record rules).
+  - [ ] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection.
 - [ ] **Milestone 3:** Target variable definition and leakage-free feature engineering.
 - [ ] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
 - [ ] **Milestone 5:** Model interpretability with SHAP.
 - [ ] **Milestone 6:** RAG retriever for comparable dramas.
 - [ ] **Milestone 7:** What-if simulator and LLM agent integration.
 - [ ] **Milestone 8:** FastAPI, Dockerization, and Hugging Face Spaces deployment.
+
