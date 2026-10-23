@@ -144,7 +144,7 @@ Formally established in `notebooks/04_target_and_scope.ipynb` and persisted to `
     1. **Majority-Class Baseline:** Predict "Medium" for all titles (**50.0% accuracy**).
     2. **Metadata-Presence Baseline:** An ablation model trained using *only* the Unknown-signals (director, screenwriter, network, cast listed or not) to isolate how much predictive signal is driven by page-completeness bias alone.
 
-### 🛠️ Leakage-Free Feature Engineering (Milestone 3, Steps 1–3)
+### 🛠️ Leakage-Free Feature Engineering (Milestone 3, Steps 1–4)
 Implemented in `src/features.py` and validated in `notebooks/05_feature_engineering.ipynb`:
 
 - **Step 1: Temporal Train/Test Split:**
@@ -159,6 +159,7 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
   - `core` ($N = 41$): Basic pitch-time features (episodes, country, original_network, content_rating, weekdays, multi-hot genres).
   - `talent_reach` ($N = 6$): Attached talent track-record reach (max/mean prior reach for director, screenwriter, lead cast).
   - `talent_experience` ($N = 8$): All-time and 5-year prior title counts ($n_{\text{prior}}$) for director, screenwriter, and cast. **Set to OFF by default** (ablation only) because raw experience features heavily track premiere year rather than talent quality.
+  - `text` ($N = 1$): `synopsis_length`. **Set to OFF by default** (ablation only) because it is page-completeness-prone (synopsis missing ~15% in train; length correlated +0.15 with watchers, and +0.18 in train / +0.21 in test with `target_pct` on non-missing rows).
   - `missingness` ($N = 4$): Binary indicators for missing metadata (aired_on, content_rating, network, genre). **Set to OFF by default** (reserved for page-completeness bias ablation benchmarking).
   - Default active modeling features: `DEFAULT_FEATURE_GROUPS = ['core', 'talent_reach']` ($N = 47$).
 
@@ -175,6 +176,13 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
     - **Variant 1 (V1 — Deployment-Style Evaluation):** Prior pool for test dramas includes Train plus earlier Test dramas ($\le \text{current} - 365\text{ days}$). Evaluates continuous real-world model deployment ($r = +0.59$ for cast reach).
     - **Variant 2 (V2 — Static Train-Only Benchmark):** Prior pool for test dramas is strictly limited to the Train set ($\le 2021$). Completely passive evaluation benchmark ($r = +0.57$ for cast reach).
     - Both feature tables are exported to `data/processed/` (`train_features_v1.csv`, `test_features_v1.csv`, `train_features_v2.csv`, `test_features_v2.csv`) and gitignored.
+
+- **Step 4: Synopsis Text Cleaning & Feature Extraction:**
+  - **Text Cleaning (`synopsis_clean`):** Stripped `(YYYY)` release year patterns, bare mentions of the drama's own `release_year` (31 dramas affected; 0 remaining), `Source:` attribution lines (e.g. `(Source: ...)`, `Source: Baidu`), MDL `~~` metadata note lines (e.g. `~~ Adapted from...`, `~~ Remake of...`), `Edit Translation` markers, translation credit lines, and redundant whitespace.
+  - **Adaptation Signal Note:** The removed `"~~ Adapted from / Remake of"` lines represent a valid pre-release signal (intellectual property / adaptation) and will be considered as a possible binary feature (`is_adaptation`) in a later experiment.
+  - **Text Feature (`synopsis_length`):** Number of words in `synopsis_clean`, strictly set to `NaN` when synopsis is missing/empty (NOT 0, ensuring missingness is not encoded as zero length). Correlates $+0.1775$ in train ($N = 4,245$) and $+0.2081$ in test ($N = 2,252$) with `target_pct` on non-missing rows.
+  - **Retrieval Index Corpus:** Full cleaned synopses for all 7,535 labeled dramas exported to `data/processed/synopses_clean.csv` (gitignored), keyed by `url` and `name`. Dramas with empty synopses ($N = 1,038$, 13.8%) will be excluded from the retrieval vector index in Milestone 6.
+  - **Text Embedding Policy:** SBERT embeddings are NOT built at this stage. Semantic embeddings are reserved for the retriever in Milestone 6, and may be tested as an optional experiment in Milestone 4 using dimensionality reduction fitted on train only.
 
 - **Critical Data Limitations & Caveats for Talent Features:**
   1. **String-Matching Without Person IDs:** Talent names are matched strictly on normalized romanized strings (`lowercase`, stripped parentheses, collapsed whitespace, unaccented). No unique MDL person IDs or URLs exist in this dataset; common romanized names may belong to different real-world individuals (homonym collisions), or split across transliteration variants.
@@ -235,7 +243,7 @@ data/raw/dramas_raw.csv
   - [x] **Step 2C:** Data cleaning, leakage-safe exclusions, pilot/special flagging, and credit count indicators (`notebooks/02_cleaning.ipynb`).
   - [x] **Step 2D:** Leakage review (column classification, pre/post-release analysis of tags, cast, crew, synopsis, and temporal track-record rules; `notebooks/03_leakage_review.ipynb`).
   - [x] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection (`notebooks/04_target_and_scope.ipynb`).
-- [ ] **Milestone 3:** Leakage-free feature engineering.
+- [x] **Milestone 3:** Leakage-free feature engineering (`notebooks/05_feature_engineering.ipynb`, `src/features.py`).
 - [ ] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
 - [ ] **Milestone 5:** Model interpretability with SHAP.
 - [ ] **Milestone 6:** RAG retriever for comparable dramas.

@@ -381,6 +381,70 @@ def compute_talent_priors(
 
 
 # =====================================================================
+# Step 4: Synopsis Text Cleaning & Feature Extraction
+# =====================================================================
+
+def clean_synopsis_text(text: Optional[str], release_year: Optional[int] = None) -> str:
+    """
+    Clean drama synopsis text:
+    - Removes 'Edit Translation' boilerplate markers.
+    - Removes '(YYYY)' year patterns (e.g. '(2019)', '(2022)') that leak release_year.
+    - Removes bare mentions of the drama's own release_year (if provided).
+    - Removes MDL '~~' metadata note lines (e.g. '~~ Adapted from...', '~~ Remake of...').
+    - Removes source attribution lines (e.g. '(Source: ...)', 'Source: ...', '[Source: ...]').
+    - Removes translation credit lines (e.g. 'Translated by: ...', 'Translation = ...').
+    - Normalizes extra whitespace.
+    
+    Returns:
+        Cleaned text string, or empty string '' if input was missing or emptied.
+    """
+    if pd.isna(text) or not str(text).strip():
+        return ""
+    t = str(text)
+    # Remove Edit Translation
+    t = re.sub(r'(?i)\(?\s*edit\s+translation\s*\)?', '', t)
+    # Remove (YYYY) patterns that leak release_year
+    t = re.sub(r'\(\s*(?:19|20)\d{2}\s*\)', '', t)
+    # Remove bare mention of own release_year if provided
+    if release_year is not None and pd.notna(release_year):
+        t = re.sub(rf'\b{int(release_year)}\b', '', t)
+    # Remove ~~ note lines (e.g. ~~ Adapted from..., ~~ Remake of...)
+    t = re.sub(r'(?m)^\s*~~.*$', '', t)
+    # Remove Source attribution lines (e.g. (Source: ...), Source: ...)
+    t = re.sub(r'(?i)[(\[]?\s*source\s*:.*?(?:[)\]]|\n|$)', '', t)
+    # Remove Translation attribution lines
+    t = re.sub(r'(?i)\(?\s*translat(?:ed\s+by|ion\s*=).*?(?:\)|\n|$)', '', t)
+    # Normalize whitespace
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def compute_synopsis_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute synopsis text features.
+    
+    Features:
+    - synopsis_clean: Cleaned synopsis string (empty '' if missing).
+    - synopsis_length: Word count of synopsis_clean; strictly NaN when synopsis
+      is missing/empty (NOT 0, so missingness is not conflated with zero length).
+    """
+    if "release_year" in df.columns:
+        clean_series = pd.Series(
+            [clean_synopsis_text(r["synopsis"], r["release_year"]) for _, r in df.iterrows()],
+            index=df.index,
+        )
+    else:
+        clean_series = df["synopsis"].apply(clean_synopsis_text)
+        
+    length_series = clean_series.apply(lambda s: np.nan if s == "" else float(len(s.split())))
+    
+    return pd.DataFrame({
+        "synopsis_clean": clean_series,
+        "synopsis_length": length_series,
+    }, index=df.index)
+
+
+# =====================================================================
 # Feature Groups Configuration (Switchable Feature Subsets)
 # =====================================================================
 
@@ -446,6 +510,9 @@ FEATURE_GROUPS = {
         "cast_n_prior_mean",
         "cast_n_prior_5yr_mean",
     ],
+    "text": [
+        "synopsis_length",
+    ],
     "missingness": [
         "aired_on_is_missing",
         "content_rating_is_missing",
@@ -456,6 +523,7 @@ FEATURE_GROUPS = {
 
 # Default active feature groups for modeling:
 # talent_experience is OFF by default because n_prior tracks premiere year (confounded with corpus start).
+# text is OFF by default because synopsis missingness (~15%) and length (+0.15 correlation) carry page-completeness bias.
 # missingness is OFF by default (reserved for page-completeness bias ablation benchmarking).
 DEFAULT_FEATURE_GROUPS = ["core", "talent_reach"]
 
@@ -463,6 +531,7 @@ DEFAULT_FEATURE_GROUPS = ["core", "talent_reach"]
 def get_feature_columns(
     groups: Optional[List[str]] = None,
     include_experience: bool = False,
+    include_text: bool = False,
     include_missingness: bool = False,
 ) -> List[str]:
     """
@@ -472,6 +541,7 @@ def get_feature_columns(
         groups: Explicit list of group names to include (e.g. ['core', 'talent_reach']).
                 If None, uses DEFAULT_FEATURE_GROUPS modified by convenience flags.
         include_experience: If True and groups is None, adds 'talent_experience' group.
+        include_text: If True and groups is None, adds 'text' group.
         include_missingness: If True and groups is None, adds 'missingness' group.
     
     Returns:
@@ -481,6 +551,8 @@ def get_feature_columns(
         active_groups = list(DEFAULT_FEATURE_GROUPS)
         if include_experience and "talent_experience" not in active_groups:
             active_groups.append("talent_experience")
+        if include_text and "text" not in active_groups:
+            active_groups.append("text")
         if include_missingness and "missingness" not in active_groups:
             active_groups.append("missingness")
     else:
