@@ -195,6 +195,155 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
 
 ---
 
+---
+
+---
+
+## 📈 Milestone 4 Results: Baselines, Feature Ablations, and Evaluation
+
+### Plain-Language Summary
+1. Pre-release pitch parameters (broadcaster network, country, genre) and attached talent track records (prior reach of director, writer, and lead cast) predict relative MDL audience-reach tier significantly better than chance (ROC-AUC 0.863 on Full Test, 0.811 on complete metadata).
+2. The talent reach lift is clear on the full test set (+0.011 ROC-AUC, +0.024 macro-F1) but not established for ROC-AUC on complete_info (-0.015 [-0.034, +0.004]), while PR-AUC on complete_info rises +0.036 [+0.005, +0.069].
+3. The page-completeness baseline is constant (0.500) on strict by construction, and scores 0.569 on complete_info, demonstrating that metadata completeness carries strong post-release confounding on uncurated pages.
+4. Models trained exclusively on complete-information dramas achieve comparable test ROC-AUC (0.808–0.810 vs 0.821), supporting the conclusion that the model learns legitimate pre-release relationships rather than relying on training-set missingness shortcuts.
+5. In ranking feature groups, attached talent reach, broadcaster network, and genre carry most of the signal.
+6. The model's predictions barely depend on episode count (internal validation permutation drop: -0.0026 ROC-AUC), meaning what-if tools should not rely on episode count to alter predicted reach.
+7. Post-hoc probability calibration using isotonic regression (selected via lowest pooled out-of-fold validation Brier score of 0.1106) reduces test Brier score from 0.1309 to 0.1273 (+0.0035 improvement, paired bootstrap excludes 0) against a base-rate Brier baseline of 0.1888.
+8. What-if adjustments in subsequent tools must be interpreted as associational forecasting benchmarks, not causal interventions.
+
+---
+
+### 1. Foundational Baselines vs. Headline Model
+
+| Model / Baseline | Full Test Accuracy | Full Test Macro-F1 | Full Test ROC-AUC [base: 0.253] | Full Test PR-AUC [base: 0.253] | complete_info ROC-AUC [base: 0.389] | strict ROC-AUC [base: 0.441] |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Majority Class (Medium)** | 0.499 [0.479, 0.521] | 0.222 [0.215, 0.229] | 0.500 [0.500, 0.500] | 0.253 [0.237, 0.270] | 0.500 [0.500, 0.500] | 0.500 [0.500, 0.500] |
+| **Stratified Random** | 0.365 [0.345, 0.381] | 0.324 [0.306, 0.342] | 0.509 [0.485, 0.533] | 0.257 [0.237, 0.277] | 0.505 [0.471, 0.538] | 0.503 [0.463, 0.548] |
+| **Country-Only Baseline** | 0.499 [0.479, 0.521] | 0.222 [0.215, 0.229] | 0.501 [0.477, 0.526] | 0.253 [0.237, 0.270] | 0.408 [0.375, 0.442] | 0.428 [0.385, 0.473] |
+| **Page Completeness Only** | 0.528 [0.509, 0.548] | 0.502 [0.483, 0.524] | 0.736 [0.714, 0.754] | 0.408 [0.375, 0.437] | 0.569 [0.538, 0.599] | 0.500 [0.500, 0.500] |
+| **Headline Model (core + talent_reach)** | **0.659 [0.637, 0.679]** | **0.655 [0.634, 0.676]** | **0.863 [0.847, 0.878]** | **0.676 [0.638, 0.710]** | **0.811 [0.787, 0.835]** | **0.821 [0.788, 0.854]** |
+
+*Notes on Baselines:*
+- Country-only is near chance by construction because the target is standardized as a percentile within each country-year cohort. On `complete_info`, Country-only yields 0.408 ROC-AUC as a selection artifact (High-tier proportion differs by country inside that slice: 44.7% in Korea vs 22.9% in Japan), not true negative signal.
+- The page-completeness baseline is constant on strict by construction (0.500) because all missingness flags are zero there, and scores 0.569 on `complete_info`.
+
+---
+
+### 2. Headline Model Performance Across Slices & Countries
+*Headline configuration: HistGradientBoosting on `core + talent_reach` (47 features, V2 static train-only priors, declared before test evaluation).*
+
+| Slice / Country | $N$ | High Base Rate | Accuracy [95% CI] | Macro-F1 [95% CI] | ROC-AUC (High) [95% CI] | PR-AUC (High) [95% CI] | Spearman ($r_s$) [95% CI] |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Full Test Set** | **2,525** | **0.253** | **0.659 [0.637, 0.679]** | **0.655 [0.634, 0.676]** | **0.863 [0.847, 0.878]** | **0.676 [0.638, 0.710]** | **+0.751 [0.735, 0.768]** |
+| **complete_info Subset** | **1,022** | **0.389** | **0.681 [0.654, 0.709]** | **0.675 [0.639, 0.709]** | **0.811 [0.787, 0.835]** | **0.739 [0.702, 0.779]** | **+0.664 [0.627, 0.700]** |
+| **complete_info_strict Subset** | **635** | **0.441** | **0.676 [0.638, 0.711]** | **0.643 [0.584, 0.697]** | **0.821 [0.788, 0.854]** | **0.792 [0.745, 0.836]** | **+0.676 [0.625, 0.723]** |
+| South Korea (Full Test) | 751 | 0.253 | 0.670 [0.634, 0.703] | 0.669 [0.633, 0.701] | 0.888 [0.862, 0.911] | 0.752 [0.690, 0.807] | +0.788 [0.758, 0.814] |
+| Thailand (Full Test) | 790 | 0.254 | 0.623 [0.589, 0.656] | 0.623 [0.587, 0.656] | 0.851 [0.820, 0.876] | 0.595 [0.527, 0.675] | +0.751 [0.722, 0.781] |
+| China (Full Test) | 532 | 0.248 | 0.695 [0.658, 0.733] | 0.687 [0.647, 0.724] | 0.886 [0.856, 0.911] | 0.717 [0.636, 0.786] | +0.774 [0.735, 0.804] |
+| Japan (Full Test) | 452 | 0.250 | 0.662 [0.617, 0.701] | 0.643 [0.594, 0.686] | 0.829 [0.783, 0.870] | 0.632 [0.543, 0.718] | +0.700 [0.651, 0.740] |
+| South Korea (`complete_info`) | 336 | 0.426 | 0.702 [0.655, 0.750] | 0.566 [0.448, 0.732] | 0.813 [0.764, 0.859] | 0.785 [0.716, 0.849] | +0.663 [0.591, 0.724] |
+| Thailand (`complete_info`) | 344 | 0.317 | 0.622 [0.576, 0.672] | 0.629 [0.578, 0.683] | 0.817 [0.771, 0.856] | 0.669 [0.585, 0.751] | +0.719 [0.651, 0.763] |
+| China (`complete_info`) | 101 | 0.624 | 0.733 [0.648, 0.812] | 0.703 [0.441, 0.851] | 0.797 [0.708, 0.885] | 0.861 [0.771, 0.929] | +0.531 [0.378, 0.683] |
+| Japan (`complete_info`) | 241 | 0.344 | 0.722 [0.660, 0.776] | 0.720 [0.644, 0.775] | 0.805 [0.750, 0.861] | 0.688 [0.597, 0.793] | +0.647 [0.560, 0.721] |
+| South Korea (`strict`) | 312 | 0.455 | 0.692 [0.639, 0.744] | 0.575 [0.439, 0.720] | 0.802 [0.754, 0.848] | 0.793 [0.737, 0.853] | +0.639 [0.564, 0.705] |
+| Thailand (`strict`) | 253 | 0.368 | 0.632 [0.577, 0.690] | 0.626 [0.565, 0.695] | 0.830 [0.779, 0.878] | 0.729 [0.641, 0.813] | +0.722 [0.643, 0.783] |
+| China (`strict`)* | 40 | 0.700 | 0.750 [0.600, 0.888] | 0.667 [0.473, 0.847] | 0.759 [0.606, 0.910] | 0.897 [0.781, 0.971] | +0.558 [0.296, 0.745] |
+| Japan (`strict`)* | 30 | 0.567 | 0.767 [0.600, 0.900] | 0.753 [0.576, 0.900] | 0.846 [0.680, 0.973] | 0.889 [0.756, 0.984] | +0.564 [0.210, 0.792] |
+
+*(\*Note: China and Japan strict sample sizes are too small for reliable conclusions).*
+
+---
+
+### 3. Feature Group Ablations & Paired Bootstrap Tests
+
+| Feature Configuration | Full Test ROC-AUC [base: 0.253] | Full Test PR-AUC [base: 0.253] | complete_info ROC-AUC [base: 0.389] | complete_info PR-AUC [base: 0.389] | strict ROC-AUC [base: 0.441] | strict PR-AUC [base: 0.441] | $\Delta$ ROC vs Headline (Full Test) | $\Delta$ Macro-F1 vs Headline (Full Test) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1. core** | 0.852 [0.836, 0.867] | 0.642 [0.606, 0.682] | 0.796 [0.770, 0.828] | 0.704 [0.660, 0.751] | 0.807 [0.772, 0.839] | 0.745 [0.685, 0.798] | -0.011 [-0.019, -0.001] * | -0.021 [-0.039, -0.003] * |
+| **2. core + talent_reach (Headline)** | **0.863 [0.847, 0.878]** | **0.676 [0.638, 0.710]** | **0.811 [0.787, 0.835]** | **0.739 [0.702, 0.779]** | **0.821 [0.788, 0.854]** | **0.792 [0.745, 0.836]** | **[Reference]** | **[Reference]** |
+| **3. core + reach + missingness** | 0.867 [0.851, 0.882] | 0.686 [0.649, 0.721] | 0.818 [0.792, 0.843] | 0.751 [0.714, 0.791] | 0.825 [0.792, 0.857] | 0.796 [0.748, 0.841] | +0.004 [-0.000, +0.008] | +0.012 [+0.001, +0.024] * |
+| **4. core + reach + talent_exp** | 0.878 [0.863, 0.892] | 0.694 [0.658, 0.727] | 0.834 [0.808, 0.859] | 0.760 [0.723, 0.801] | 0.839 [0.810, 0.868] | 0.803 [0.752, 0.846] | +0.015 [+0.010, +0.021] * | +0.015 [+0.002, +0.029] * |
+| **5. core + reach + text** | 0.868 [0.853, 0.884] | 0.691 [0.654, 0.727] | 0.816 [0.792, 0.841] | 0.748 [0.712, 0.788] | 0.830 [0.800, 0.861] | 0.803 [0.753, 0.845] | +0.006 [+0.000, +0.011] * | +0.006 [-0.009, +0.022] |
+| **6. talent_reach only** | 0.769 [0.747, 0.788] | 0.516 [0.474, 0.555] | 0.721 [0.691, 0.750] | 0.595 [0.548, 0.647] | 0.730 [0.689, 0.770] | 0.661 [0.602, 0.724] | -0.094 [-0.110, -0.079] * | -0.193 [-0.217, -0.171] * |
+| **7. all groups** | 0.882 [0.868, 0.895] | 0.709 [0.674, 0.743] | 0.838 [0.813, 0.861] | 0.767 [0.731, 0.807] | 0.845 [0.815, 0.873] | 0.809 [0.760, 0.850] | +0.019 [+0.012, +0.026] * | +0.017 [+0.002, +0.036] * |
+| **8. Drop 2015 burn-in** | 0.867 [0.852, 0.881] | 0.682 [0.646, 0.718] | 0.813 [0.788, 0.837] | 0.741 [0.705, 0.783] | 0.820 [0.786, 0.851] | 0.789 [0.743, 0.832] | +0.004 [+0.000, +0.008] * | -0.006 [-0.017, +0.004] |
+| **9. V1 rolling priors** | 0.868 [0.852, 0.883] | 0.688 [0.652, 0.724] | 0.821 [0.796, 0.847] | 0.753 [0.717, 0.791] | 0.830 [0.799, 0.859] | 0.803 [0.759, 0.844] | +0.005 [+0.002, +0.009] * | +0.001 [-0.006, +0.007] |
+| **10. Linear Reference (LogisticReg)** | 0.864 [0.848, 0.879] | 0.673 [0.638, 0.711] | 0.818 [0.794, 0.843] | 0.741 [0.703, 0.785] | 0.833 [0.802, 0.862] | 0.797 [0.748, 0.842] | +0.001 [-0.007, +0.009] | -0.037 [-0.052, -0.019] * |
+
+---
+
+### 4. Shortcut-Free Training Experiments
+
+| Training Split | Evaluation Slice | Accuracy [95% CI] | Macro-F1 [95% CI] | ROC-AUC (High) [95% CI] | PR-AUC (High) [95% CI] | Spearman ($r_s$) [95% CI] |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Trained on ALL** ($N=5,010$) | `complete_info` test ($N=1,022$) | 0.681 [0.654, 0.709] | 0.675 [0.639, 0.709] | 0.811 [0.787, 0.835] | 0.739 [0.702, 0.779] [base: 0.389] | +0.664 [0.627, 0.700] |
+| **Trained on complete_info** ($N=2,022$) | `complete_info` test ($N=1,022$) | 0.651 [0.623, 0.682] | 0.633 [0.593, 0.668] | 0.801 [0.776, 0.830] | 0.727 [0.688, 0.773] [base: 0.389] | +0.647 [0.610, 0.685] |
+| **Trained on ALL** ($N=5,010$) | `strict` test ($N=635$) | 0.676 [0.638, 0.711] | 0.643 [0.584, 0.697] | 0.821 [0.788, 0.854] | 0.792 [0.745, 0.836] [base: 0.441] | +0.676 [0.625, 0.723] |
+| **Trained on complete_info** ($N=2,022$) | `strict` test ($N=635$) | 0.647 [0.605, 0.686] | 0.596 [0.533, 0.649] | 0.810 [0.777, 0.843] | 0.767 [0.716, 0.815] [base: 0.441] | +0.661 [0.612, 0.709] |
+| **Trained on strict** ($N=1,072$) | `strict` test ($N=635$) | 0.661 [0.625, 0.698] | 0.584 [0.523, 0.638] | 0.808 [0.774, 0.841] | 0.763 [0.713, 0.813] [base: 0.441] | +0.654 [0.603, 0.701] |
+
+*Interpretation:*
+These results **support** the conclusion that the model learns legitimate pre-release relationships rather than relying on missingness shortcuts. Because `complete_info` still allows missing `content_rating`, `aired_on`, and `genres`, the model trained strictly on `complete_info_strict` ($N=1,072$) and evaluated on `strict` test ($N=635$) is the cleanest test: its ROC-AUC (0.808) is within sampling error of the model trained on all data (0.821), showing that missingness shortcuts during training are not required to achieve strong ranking performance on clean data.
+
+---
+
+### 5. Signal Decomposition & Validation Permutation Importance
+
+| Feature Sub-group | Isolated ROC-AUC (Full Test) | Isolated Macro-F1 (Full Test) | LOO Retrained ROC-AUC (Full Test) | Mean Drop in Val ROC-AUC ($\pm$ std) | Mean Drop in Val Macro-F1 ($\pm$ std) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **talent_reach** (6 features) | 0.769 | 0.516 | 0.852 | **+0.0965 ($\pm 0.0084$)** | **+0.1079 ($\pm 0.0084$)** |
+| **genres** (30 features) | 0.745 | 0.473 | 0.849 | +0.0417 ($\pm 0.0050$) | +0.0491 ($\pm 0.0053$) |
+| **content_rating** (1 feature) | 0.689 | 0.361 | 0.849 | +0.0416 ($\pm 0.0045$) | +0.0283 ($\pm 0.0074$) |
+| **network + country** (2 features) | 0.740 | 0.449 | 0.852 | +0.0376 ($\pm 0.0071$) | +0.0685 ($\pm 0.0115$) |
+| **weekdays** (7 features) | 0.636 | 0.414 | 0.852 | +0.0290 ($\pm 0.0038$) | +0.0162 ($\pm 0.0051$) |
+| **episodes** (1 feature) | 0.582 | 0.278 | 0.865 | -0.0026 ($\pm 0.0018$) | -0.0053 ($\pm 0.0046$) |
+
+*Methodological Note:* Group permutation importance (evaluating drops on a fixed model on internal validation) and leave-one-out retraining answer different questions: permutation measures how much the existing model relies on the group in the presence of other features, while LOO measures whether the model can compensate by retraining using remaining correlated features. Both analyses confirm that **the model's predictions barely depend on episode count**, so what-if tools should not rely on episode count to alter predicted success.
+
+---
+
+### 6. Probability Calibration: Equal-Count Deciles & Out-of-Fold Selection
+*Calibrators were fitted strictly on pooled out-of-fold validation predictions from expanding-window folds (<=2017 -> 2018, <=2018 -> 2019, <=2019 -> 2020-2021, N = 2,609). Calibrator choice was determined by the rule of **lowest out-of-fold Brier score** before evaluating on test data:*
+- Out-of-Fold Raw Brier: `0.1188`
+- Out-of-Fold Platt Brier: `0.1137`
+- Out-of-Fold Isotonic Brier: `0.1106` *(Selected: Isotonic Regression)*
+
+*Evaluated on Full Test (N=2,525) using 10 equal-count (decile) bins (N ~ 252-253 dramas per bin). The Brier score baseline of predicting the test base rate (0.2527 * 0.7473) is **0.1888**:*
+
+| Metric / Decile Bin | Raw Model | Platt Scaling | Isotonic Regression (Selected) |
+| :--- | :---: | :---: | :---: |
+| **Full Test Brier Score** (baseline = 0.1888) | 0.1309 | 0.1296 | **0.1273** |
+| **Equal-Count ECE (Deciles)** | 0.0487 | 0.0515 | **0.0360** |
+| **Brier Improvement vs Raw** (500 resamples) | [Reference] | +0.0013 [-0.0018, +0.0044] | **+0.0035 [+0.0006, +0.0064] \*** |
+| **ECE Improvement vs Raw** (500 resamples) | [Reference] | -0.0028 [-0.0157, +0.0174] | +0.0126 [-0.0045, +0.0336] |
+| Decile 1 ($N=253$) | Pred: 0.008, Obs: 0.008 (+0.001) | Pred: 0.043, Obs: 0.012 (+0.031) | Pred: 0.000, Obs: 0.000 (+0.000) |
+| Decile 2 ($N=252$) | Pred: 0.021, Obs: 0.004 (+0.017) | Pred: 0.055, Obs: 0.008 (+0.047) | Pred: 0.005, Obs: 0.007 (-0.001) |
+| Decile 3 ($N=253$) | Pred: 0.044, Obs: 0.020 (+0.024) | Pred: 0.076, Obs: 0.012 (+0.064) | Pred: 0.021, Obs: 0.016 (+0.005) |
+| Decile 4 ($N=252$) | Pred: 0.081, Obs: 0.079 (+0.001) | Pred: 0.108, Obs: 0.083 (+0.025) | Pred: 0.032, Obs: 0.070 (-0.038) |
+| Decile 5 ($N=252$) | Pred: 0.141, Obs: 0.143 (-0.002) | Pred: 0.158, Obs: 0.147 (+0.011) | Pred: 0.075, Obs: 0.108 (-0.032) |
+| Decile 6 ($N=253$) | Pred: 0.226, Obs: 0.237 (-0.011) | Pred: 0.230, Obs: 0.237 (-0.007) | Pred: 0.129, Obs: 0.203 (-0.074) |
+| Decile 7 ($N=252$) | Pred: 0.350, Obs: 0.286 (+0.064) | Pred: 0.339, Obs: 0.286 (+0.053) | Pred: 0.211, Obs: 0.267 (-0.055) |
+| Decile 8 ($N=253$) | Pred: 0.516, Obs: 0.411 (+0.105) | Pred: 0.490, Obs: 0.407 (+0.083) | Pred: 0.312, Obs: 0.346 (-0.034) |
+| Decile 9 ($N=252$) | Pred: 0.708, Obs: 0.571 (+0.137) | Pred: 0.669, Obs: 0.583 (+0.086) | Pred: 0.537, Obs: 0.570 (-0.033) |
+| Decile 10 ($N=253$) | Pred: 0.891, Obs: 0.767 (+0.125) | Pred: 0.840, Obs: 0.763 (+0.077) | Pred: 0.809, Obs: 0.730 (+0.079) |
+
+*Calibration Diagnostics & Limitations:*
+- Raw model probabilities are well-ordered across deciles but overconfident in upper deciles D7–D10 (e.g. Decile 9 predicts 70.8% High vs 57.1% observed).
+- Isotonic regression fitted on pooled expanding-window validation significantly improves Brier score (+0.0035, 95% CI: [+0.0006, +0.0064], distinguishable from noise) and reduces equal-count ECE from 4.87% to 3.60%.
+- The calibrator was selected using Brier scores computed on the same out-of-fold predictions it was fitted on, which favors flexible methods (isotonic); the test-set improvement (Brier +0.0035 [+0.0006, +0.0064]) is the evidence that matters, and leave-one-fold-out selection would be cleaner.
+- The out-of-fold predictions come from models trained on smaller windows than the final model.
+
+---
+
+### 7. Methodological Guardrails & Limitations
+1. **Headline Feature Selection:** The headline (`core + talent_reach`, V2 priors) was declared before test evaluation and is retained even though "all groups" scores slightly higher. Including `talent_experience` and `text` introduces premiere-year confounding and page-completeness bias.
+2. **Multiple Comparisons Caution:** Many comparisons were run across feature groups and subsets; results with an interval that barely excludes zero should be treated as suggestive rather than definitive.
+3. **Metric Stability on Subsets:** On `complete_info` and strict complete info, Macro-F1 is unstable because the Low class represents only ~7.5%–9.5% of the dramas. Therefore, ROC-AUC, PR-AUC, and Spearman correlation are the primary metrics on these slices.
+4. **Text Feature Finding:** Adding `synopsis_length` **does not help** (it lowers complete_info Macro-F1 by -0.048). As hypothesized, synopsis presence acts primarily as a page-completeness artifact rather than a substantive predictor of pitch quality.
+5. **Associational vs. Causal Interpretation:** All predictions and what-if scenario simulations in subsequent milestones are associational forecasting tools, not causal interventions.
+6. **Bootstrap Independence Limitation:** 500 bootstrap resamples treat dramas as independent observations even though dramas frequently share talent, directors, and sequel universes.
+
+---
+
 ## ⚙️ Setup & Installation
 
 ### 1. Environment Setup
@@ -244,7 +393,7 @@ data/raw/dramas_raw.csv
   - [x] **Step 2D:** Leakage review (column classification, pre/post-release analysis of tags, cast, crew, synopsis, and temporal track-record rules; `notebooks/03_leakage_review.ipynb`).
   - [x] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection (`notebooks/04_target_and_scope.ipynb`).
 - [x] **Milestone 3:** Leakage-free feature engineering (`notebooks/05_feature_engineering.ipynb`, `src/features.py`).
-- [ ] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
+- [x] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
 - [ ] **Milestone 5:** Model interpretability with SHAP.
 - [ ] **Milestone 6:** RAG retriever for comparable dramas.
 - [ ] **Milestone 7:** What-if simulator and LLM agent integration.
