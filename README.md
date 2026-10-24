@@ -209,7 +209,7 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
 
 ### Plain-Language Summary
 1. Pre-release pitch parameters (broadcaster network, country, genre) and attached talent track records (prior reach of director, writer, and lead cast) predict relative MDL audience-reach tier significantly better than chance (ROC-AUC 0.863 on Full Test, 0.811 on complete metadata).
-2. The talent reach lift on the full test set is small but distinguishable from zero (ROC-AUC +0.011 [+0.001, +0.019], Macro-F1 +0.021 [+0.003, +0.039]; lower bounds close to 0), but not established for ROC-AUC on complete_info (+0.015 [-0.004, +0.035]; Core minus Headline: -0.015 [-0.035, +0.004], within noise), while PR-AUC on complete_info rises +0.036 [+0.005, +0.063] *.
+2. The talent reach lift on the full test set is small but distinguishable from zero (ROC-AUC +0.011 [+0.001, +0.019], Macro-F1 +0.021 [+0.003, +0.039]; lower bounds close to 0), but not established for ROC-AUC on complete_info (+0.015 [-0.004, +0.035], within noise), while PR-AUC on complete_info rises +0.036 [+0.005, +0.063].
 3. The page-completeness baseline is constant (0.500) on strict by construction, and scores 0.569 on complete_info, indicating that metadata completeness carries strong post-release confounding on uncurated pages.
 4. Models trained exclusively on complete-information dramas achieve comparable test ROC-AUC (0.808–0.810 vs 0.821), supporting the conclusion that the model learns legitimate pre-release relationships rather than relying on training-set missingness shortcuts.
 5. In ranking feature groups, attached talent reach, broadcaster network, and genre carry most of the signal.
@@ -388,8 +388,10 @@ The SHAP net group rankings agree with Milestone 4 findings in identifying the s
 | **Without `weekdays`** | -0.007 [-0.017, +0.003] | -0.010 [-0.014, -0.007] * | -0.004 [-0.021, +0.013] | -0.008 [-0.014, -0.002] * | -0.003 [-0.029, +0.025] | -0.007 [-0.014, +0.002] |
 | **Without `episodes`** | -0.002 [-0.011, +0.006] | +0.002 [-0.001, +0.005] | -0.008 [-0.026, +0.012] | +0.001 [-0.004, +0.007] | -0.006 [-0.030, +0.014] | +0.000 [-0.008, +0.009] |
 
+*\* = 95% interval excludes 0.*
+
 *(Note on validation vs. test: LOO retraining models were trained on all 5,010 training titles and evaluated directly across the 2,525 test dramas; LOO retraining was not evaluated on internal validation folds).*
-Across all slices, 36 paired difference intervals were examined, so intervals whose bound is within 0.002 of zero are suggestive only. "Within noise" on `complete_info` ($N=1,022$) and strict ($N=635$) means low power on smaller subsamples, not proof of no effect. Removing `weekdays` lowers ROC-AUC on the full test set and `complete_info` but not on strict (where `aired_on` is always known), consistent with the weekday columns carrying an observational blank-vs-filled signal on less complete pages.
+All LOO models were retrained using the identical hyperparameters and random seed as the headline model (`learning_rate=0.05`, `max_iter=100`, `max_leaf_nodes=15`, `min_samples_leaf=30`, `l2_regularization=1.0`, `random_state=42`), differing only in the omitted feature columns. Across all slices, 36 paired difference intervals were examined, so intervals whose bound is within 0.002 of zero are suggestive only. "Within noise" on `complete_info` ($N=1,022$) and strict ($N=635$) means low power on smaller subsamples, not proof of no effect. Removing `weekdays` lowers ROC-AUC on the full test set and `complete_info` but not on strict (where `aired_on` is always known), consistent with the weekday columns carrying an observational blank-vs-filled signal on less complete pages.
 - **SHAP PermutationExplainer on Test:** Evaluates the fitted tree ensemble directly, decomposing shared feature interactions into marginal group attributions.
 
 *Stability Check:*
