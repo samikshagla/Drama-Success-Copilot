@@ -50,12 +50,12 @@ GROUP_DEFS = {
 }
 
 
-# Held-out observed High rate of the likelihood band from out-of-fold calibration data
-OOF_BAND_OBSERVED_RATES = {
-    "Unlikely": "7.1% (held-out out-of-fold observed High rate, relative to dramas of the same country and year)",
-    "Possible": "31.3% (held-out out-of-fold observed High rate, relative to dramas of the same country and year)",
-    "Likely": "58.6% (held-out out-of-fold observed High rate, relative to dramas of the same country and year)",
-    "Very likely": "86.4% (held-out out-of-fold observed High rate, relative to dramas of the same country and year)",
+# Observed High rate of the likelihood band on test dramas (released 2022-2025, N=2,525)
+TEST_BAND_OBSERVED_RATES = {
+    "Unlikely": "7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year)",
+    "Possible": "31.7% [95% CI: 27.9%, 35.8%] (N=527; observed on test dramas released 2022-2025, relative to dramas of the same country and year)",
+    "Likely": "57.8% [95% CI: 52.6%, 62.9%] (N=351; observed on test dramas released 2022-2025, relative to dramas of the same country and year)",
+    "Very likely": "79.6% [95% CI: 73.7%, 84.5%] (N=211; observed on test dramas released 2022-2025, relative to dramas of the same country and year)",
 }
 
 
@@ -430,7 +430,7 @@ def explain_drama(
     cal_p_rounded_5pct = float(round(cal_p_high * 20.0) / 20.0)
 
     # 3. Likelihood band (4 tiers based on calibrated P(High))
-    if cal_p_high < 0.25:
+    if cal_p_high < 0.20:
         likelihood_band = "Unlikely"
     elif cal_p_high < 0.50:
         likelihood_band = "Possible"
@@ -504,7 +504,7 @@ def explain_drama(
         "calibrated_p_high_rounded_5pct": round(cal_p_rounded_5pct, 2),
         "likelihood_band": likelihood_band,
         "likelihood_band_definition": "Likelihood to reach the High audience-reach tier relative to dramas of the same country and year",
-        "band_observed_rate": OOF_BAND_OBSERVED_RATES[likelihood_band],
+        "band_observed_rate": TEST_BAND_OBSERVED_RATES[likelihood_band],
         "base_value": float(base_val),
         "group_attributions": {g: float(val) for g, val in sorted(group_signed.items(), key=lambda x: abs(x[1]), reverse=True)},
         "top_positive_groups": top_pos_list,

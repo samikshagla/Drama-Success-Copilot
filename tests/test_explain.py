@@ -195,7 +195,7 @@ def test_json_serializable_and_expected_keys(artifacts):
         assert key in loaded, f"Expected key '{key}' missing from explain_drama output!"
 
     assert loaded["likelihood_band"] in ["Unlikely", "Possible", "Likely", "Very likely"]
-    assert "relative to dramas of the same country and year" in loaded["band_observed_rate"]
+    assert "observed on test dramas released 2022-2025, relative to dramas of the same country and year" in loaded["band_observed_rate"]
     assert 0.02 <= loaded["calibrated_p_high"] <= 0.98
     assert len(loaded["group_attributions"]) == len(GROUP_DEFS)
 
