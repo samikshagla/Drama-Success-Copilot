@@ -1,6 +1,12 @@
 # Drama Success Copilot 🎬
 
-An end-to-end AI/GenAI decision support system designed to predict whether an Asian drama concept (Korean, Chinese, Japanese, Thai) is likely to succeed, explain the key drivers behind the prediction, and generate actionable greenlight recommendations for production teams.
+### 📋 Project Summary
+- **Goal:** Estimates how likely an Asian drama pitch is to reach the High tier of relative audience reach on MyDramaList, compared with dramas of the same country and premiere year, and explains the key feature drivers behind the prediction.
+- **Data:** 7,535 labeled dramas (6+ episodes, 2015–2025 cohorts with scraper coverage gaps).
+- **Split:** Strictly time-split — trained on 5,010 dramas released through 2021, tested on 2,525 dramas released 2022 or later.
+- **Results:** ROC-AUC for High tier vs. not-High is **0.863** on the full test set ($N=2,525$) and **0.811** on `complete_info` ($N=1,022$, all credits listed), against page-completeness-only baselines of 0.736 and 0.569.
+- **Limitations:** Observational page-completeness bias on uncurated pages, associational forecasts rather than causal pitch levers, scraper coverage gaps (partial years in China/Japan/Korea), and target measures relative MDL audience reach rather than broadcast ratings or revenue.
+- **Status:** Milestones 1–5 done (data audit, leakage review, feature engineering, modeling & calibration, SHAP explainability module); retriever, agent, and deployment planned.
 
 ---
 
@@ -31,7 +37,7 @@ Drama-Success-Copilot/
 ├── data/
 │   ├── raw/                 # Scraped raw datasets (full data ignored by git)
 │   │   └── sample_50_dramas.csv  # 5-row synthetic schema sample (not real data)
-│   └── processed/           # Cleaned and feature-engineered datasets
+│   └── processed/           # Cleaned and feature-engineered datasets (ignored by git)
 ├── notebooks/               # Jupyter notebooks for EDA and experiments
 ├── src/                     # Production Python modules (cleaning, modeling, RAG)
 ├── app/                     # FastAPI backend and frontend UI
@@ -358,9 +364,9 @@ Feature attribution is computed as the **net group effect**: for each drama, the
 | Rank | Feature Group | Features Included | Mean \|Net SHAP\| | Signed Mean SHAP | Agreement with Milestone 4 |
 | :---: | :--- | :--- | :---: | :---: | :--- |
 | **1** | **Lead Cast Reach** (`talent_cast`) | `cast_prior_reach_max`, `mean` | **0.0846** | +0.0223 | Same top driver as core -> headline ablation lift (+0.011 ROC lift) |
-| **2** | **Broadcaster Network** (`network`) | `original_network` | **0.0777** | +0.0066 | Top LOO retraining drop (-0.038 macro-F1) |
+| **2** | **Broadcaster Network** (`network`) | `original_network` | **0.0777** | +0.0066 | Top LOO retraining drop (-0.051 Macro-F1 on Full Test vs. headline 0.656; -0.031 on complete_info vs. 0.675) |
 | **3** | **Content Rating** (`content_rating`)| `content_rating` | **0.0734** | +0.0186 | Strong standalone category signal (18+ vs G) |
-| **4** | **Genres** (`genres`) | 30 one-hot genre indicators | **0.0646** | -0.0112 | 2nd LOO retraining drop (-0.035 macro-F1) |
+| **4** | **Genres** (`genres`) | 30 one-hot genre indicators | **0.0646** | -0.0112 | 2nd LOO retraining drop (-0.044 Macro-F1 on Full Test vs. headline 0.656; -0.055 on complete_info vs. 0.675) |
 | **5** | **Screenwriter Reach** (`screenwriter`)| `screenwriter_prior_reach_max`, `mean`| **0.0325** | +0.0184 | Secondary creator reach signal |
 | **6** | **Country Cohort** (`country`) | `country` | **0.0319** | -0.0119 | Baseline cohort adjustment |
 | **7** | **Director Reach** (`director`) | `director_prior_reach_max`, `mean` | **0.0316** | +0.0117 | Secondary creator reach signal |
@@ -371,7 +377,14 @@ Feature attribution is computed as the **net group effect**: for each drama, the
 The SHAP net group rankings agree with Milestone 4 findings in identifying the same primary signals (lead cast, network, content rating, genres) and confirming that **episode count ranks last**. Exact metrics reflect complementary methodologies:
 - **core -> headline ablation lift:** Adding talent reach to core features produced a **+0.011 ROC-AUC lift** (0.852 to 0.863 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8), matching SHAP identifying lead cast as the #1 global driver.
 - **Priors Pool Comparison (V1 vs V2):** Expanding the talent track record from train-only priors (V2) to rolling full-history priors (V1) produced an ROC-AUC difference of **~0.005** (0.863 vs 0.868 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8).
-- **Ablation vs LOO Differences:** In additive ablations (`06_modeling.ipynb` Cell 8), talent track record provides the strongest lift over baseline core features (+0.011 ROC-AUC, +0.021 Macro-F1). In leave-one-out (LOO) retraining, removing `network + country` (-0.038 to -0.051 Macro-F1) or `genres` (-0.035 to -0.047 Macro-F1) drops performance more than removing `talent_reach` (-0.024 Macro-F1; 0.656 to 0.632 on full test) or `content_rating` (-0.021 Macro-F1), while removing `episodes` has virtually zero impact (-0.002 Macro-F1). This confirms that remaining correlated features can partially compensate for missing talent history, but cannot fully compensate for broad cohort and genre baselines.
+- **Ablation vs LOO Differences:** In additive ablations (`06_modeling.ipynb` Cell 8), attached talent track record provides the strongest lift over baseline core features (+0.011 ROC-AUC, +0.021 Macro-F1 on full test). In leave-one-out (LOO) retraining across test slices (retraining the model without each group and evaluating against headline baselines from `06_modeling.ipynb` Cell 8: Full Test Macro-F1 = 0.656 [0.633, 0.674], complete_info Macro-F1 = 0.675 [0.639, 0.709], strict Macro-F1 = 0.643 [0.584, 0.697]):
+  - Removing `network + country`: drops Macro-F1 by **-0.051 on Full Test** (0.605 vs. 0.656), **-0.031 on complete_info** (0.644 vs. 0.675), and **-0.014 on strict** (0.629 vs. 0.643).
+  - Removing `genres`: drops Macro-F1 by **-0.044 on Full Test** (0.612 vs. 0.656), **-0.055 on complete_info** (0.620 vs. 0.675), and **-0.066 on strict** (0.577 vs. 0.643).
+  - Removing `talent_reach`: drops Macro-F1 by **-0.021 on Full Test** (0.635 vs. 0.656), **-0.016 on complete_info** (0.659 vs. 0.675), and changes by **+0.026 on strict** (0.669 vs. 0.643).
+  - Removing `content_rating`: drops Macro-F1 by **-0.021 on Full Test** (0.635 vs. 0.656), **-0.018 on complete_info** (0.657 vs. 0.675), and **-0.003 on strict** (0.640 vs. 0.643).
+  - Removing `weekdays`: drops Macro-F1 by **-0.008 on Full Test** (0.648 vs. 0.656), **-0.005 on complete_info** (0.670 vs. 0.675), and **-0.004 on strict** (0.639 vs. 0.643).
+  - Removing `episodes`: drops Macro-F1 by **-0.003 on Full Test** (0.653 vs. 0.656), **-0.008 on complete_info** (0.667 vs. 0.675), and **-0.007 on strict** (0.636 vs. 0.643).
+  *(Note on validation vs. test: LOO retraining models were trained on all 5,010 training titles and evaluated directly across the 2,525 test dramas; LOO retraining was not evaluated on internal validation folds. Also note that 0.656 is the headline model's Full Test Macro-F1, whereas 0.659 is its Full Test Accuracy).* This confirms that removing broad cohort baselines (`network + country`) or core genre flags hurts performance significantly more than removing attached talent history or episode counts.
 - **SHAP PermutationExplainer on Test:** Evaluates the fitted tree ensemble directly, decomposing shared feature interactions into marginal group attributions.
 
 *Stability Check:*
@@ -605,7 +618,7 @@ All dataset processing and serialized model artifacts are generated through comm
 
 > [!IMPORTANT]
 > **Data Availability & Rebuild Scope:**
-> The raw scraping dump `data/raw/dramas_raw.csv` (~15.35 MB) is gitignored and **not published** in the repository to maintain clean git hygiene. Consequently, outside users cannot rerun Step 0 or Step 1 to regenerate `data/processed/` tables from scratch. Instead, the final processed tables (`dramas_labeled.csv`, `train_features_v2.csv`, `test_features_v2.csv`) are tracked in the repository, enabling users to independently rebuild all serialized `models/` artifacts via `python src/build_artifacts.py` and run the entire test suite.
+> Neither `data/raw/` nor `data/processed/` is published in the repository (both are gitignored to maintain clean hygiene). Consequently, `src/build_artifacts.py` can only be run by someone who has produced `data/processed/` locally. On a fresh clone, the serialized model artifacts and processed datasets are absent, so running `pytest tests/ -v` cleanly skips all tests.
 
 | Step | Notebook / Script | Inputs Read | Artifacts Generated | Description from Code / Execution Notes |
 | :---: | :--- | :--- | :--- | :--- |
@@ -624,7 +637,7 @@ All dataset processing and serialized model artifacts are generated through comm
 > ```
 > Skipping: Missing artifacts or data required for tests: models/headline_model.joblib, models/isotonic_calibrator.joblib, models/background_sample.joblib, models/talent_lookup.joblib, models/metadata.joblib, data/processed/dramas_labeled.csv, data/processed/train_features_v2.csv, data/processed/test_features_v2.csv
 > ```
-> Once `data/processed/` tables are present, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 8 unit and integration tests cleanly in ~24s.
+> If `data/processed/` tables have been produced locally, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 8 unit and integration tests cleanly in ~24s.
 
 
 

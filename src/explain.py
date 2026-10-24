@@ -59,6 +59,18 @@ TEST_BAND_OBSERVED_RATES = {
 }
 
 
+def band_for(cal_p_high: float) -> str:
+    """Return likelihood band for a calibrated P(High) probability using standard 0.20, 0.50, 0.75 cutoffs."""
+    if cal_p_high < 0.20:
+        return "Unlikely"
+    elif cal_p_high < 0.50:
+        return "Possible"
+    elif cal_p_high < 0.75:
+        return "Likely"
+    else:
+        return "Very likely"
+
+
 def load_artifacts(models_dir: Union[str, Path] = None) -> Dict[str, Any]:
     """Load serialized model artifacts from models directory, anchored at repo root."""
     global _CACHED_ARTIFACTS
@@ -430,14 +442,7 @@ def explain_drama(
     cal_p_rounded_5pct = float(round(cal_p_high * 20.0) / 20.0)
 
     # 3. Likelihood band (4 tiers based on calibrated P(High))
-    if cal_p_high < 0.20:
-        likelihood_band = "Unlikely"
-    elif cal_p_high < 0.50:
-        likelihood_band = "Possible"
-    elif cal_p_high < 0.75:
-        likelihood_band = "Likely"
-    else:
-        likelihood_band = "Very likely"
+    likelihood_band = band_for(cal_p_high)
 
     # 4. SHAP Permutation Explainer
     def predict_high_proba(arr):

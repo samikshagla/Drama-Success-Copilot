@@ -195,6 +195,8 @@ def test_json_serializable_and_expected_keys(artifacts):
         assert key in loaded, f"Expected key '{key}' missing from explain_drama output!"
 
     assert loaded["likelihood_band"] in ["Unlikely", "Possible", "Likely", "Very likely"]
+    from src.explain import band_for
+    assert loaded["likelihood_band"] == band_for(loaded["calibrated_p_high"])
     assert "observed on test dramas released 2022-2025, relative to dramas of the same country and year" in loaded["band_observed_rate"]
     assert 0.02 <= loaded["calibrated_p_high"] <= 0.98
     assert len(loaded["group_attributions"]) == len(GROUP_DEFS)
@@ -404,4 +406,22 @@ def test_saved_model_reproduces_test_metrics(artifacts):
     assert np.isclose(brier_raw, 0.1309, atol=0.0005), f"Raw Brier mismatch: {brier_raw}"
     assert np.isclose(brier_cal, 0.1273, atol=0.0005), f"Calibrated Brier mismatch: {brier_cal}"
     assert np.isclose(f1, 0.6557, atol=0.005), f"Macro-F1 mismatch: {f1}"
+
+
+def test_likelihood_band_boundary_thresholds():
+    """Verify band_for(p) strictly follows 0.20, 0.50, 0.75 thresholds at boundaries."""
+    from src.explain import band_for
+    boundary_cases = [
+        (0.0, "Unlikely"),
+        (0.199, "Unlikely"),
+        (0.20, "Possible"),
+        (0.499, "Possible"),
+        (0.50, "Likely"),
+        (0.749, "Likely"),
+        (0.75, "Very likely"),
+        (1.0, "Very likely"),
+    ]
+    for p, expected in boundary_cases:
+        assert band_for(p) == expected, f"band_for({p}) returned {band_for(p)}, expected {expected}"
+
 
