@@ -47,8 +47,8 @@ REQUIRED_DATA_FILES = [
     repo_root / "data/processed/test_features_v2.csv",
 ]
 
-missing_models = [str(p) for p in REQUIRED_MODEL_FILES if not p.exists()]
-missing_data = [str(p) for p in REQUIRED_DATA_FILES if not p.exists()]
+missing_models = [p.relative_to(repo_root).as_posix() for p in REQUIRED_MODEL_FILES if not p.exists()]
+missing_data = [p.relative_to(repo_root).as_posix() for p in REQUIRED_DATA_FILES if not p.exists()]
 missing_artifacts = missing_models + missing_data
 
 pytestmark = pytest.mark.skipif(
@@ -162,6 +162,7 @@ def test_shap_additivity_5_dramas(artifacts):
         raw_p = res["raw_p_high"]
         diff = abs((base + total_attrib) - raw_p)
         assert diff < 1e-9, f"SHAP additivity failed for {drama['title']}: diff = {diff:.2e}"
+        assert 0.02 <= res["calibrated_p_high"] <= 0.98, f"Calibrated P(High) out of [0.02, 0.98] bounds: {res['calibrated_p_high']}"
 
 
 def test_json_serializable_and_expected_keys(artifacts):
@@ -182,6 +183,7 @@ def test_json_serializable_and_expected_keys(artifacts):
         "calibrated_p_high_rounded_5pct",
         "likelihood_band",
         "likelihood_band_definition",
+        "band_observed_rate",
         "base_value",
         "group_attributions",
         "top_positive_groups",
@@ -193,6 +195,8 @@ def test_json_serializable_and_expected_keys(artifacts):
         assert key in loaded, f"Expected key '{key}' missing from explain_drama output!"
 
     assert loaded["likelihood_band"] in ["Unlikely", "Possible", "Likely", "Very likely"]
+    assert "relative to dramas of the same country and year" in loaded["band_observed_rate"]
+    assert 0.02 <= loaded["calibrated_p_high"] <= 0.98
     assert len(loaded["group_attributions"]) == len(GROUP_DEFS)
 
 
