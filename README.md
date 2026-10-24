@@ -30,7 +30,7 @@ The project is built iteratively across 6 core pillars:
 Drama-Success-Copilot/
 ├── data/
 │   ├── raw/                 # Scraped raw datasets (full data ignored by git)
-│   │   └── sample_50_dramas.csv  # 50-row sample tracked for reproducibility
+│   │   └── sample_50_dramas.csv  # 5-row synthetic schema sample (not real data)
 │   └── processed/           # Cleaned and feature-engineered datasets
 ├── notebooks/               # Jupyter notebooks for EDA and experiments
 ├── src/                     # Production Python modules (cleaning, modeling, RAG)
@@ -46,7 +46,7 @@ Drama-Success-Copilot/
 - **Source:** Scraped from [MyDramaList (MDL)](https://mydramalist.com/).
 - **Coverage:** Korean, Chinese, Japanese, and Thai dramas.
 - **Scale:** 10,400 drama titles with 20 raw attributes capturing metadata, audience metrics, content tags, genres, and cast composition.
-- **Storage Policy:** Large raw files (`>15MB`) and scraper state files are safely excluded from version control via `.gitignore`. A 50-row sample (`data/raw/sample_50_dramas.csv`) is versioned for local smoke tests.
+- **Storage Policy:** Large raw files (`>15MB`) and scraper state files are safely excluded from version control via `.gitignore`. A 5-row synthetic schema sample (`data/raw/sample_50_dramas.csv`) with placeholder text is versioned for smoke tests and schema validation (it is not real scraped data).
 
 ### ⚠️ Data Limitations & Coverage Gaps (Provenance Audit)
 An audit of the scraper code (`mdl_scraper/`) revealed specific temporal coverage gaps that dictate our modeling decisions:
@@ -368,10 +368,11 @@ Feature attribution is computed as the **net group effect**: for each drama, the
 | **9** | **Episode Count** (`episodes`) | `episodes` | **0.0172** | -0.0062 | Consistent with Milestone 4: episode count carries lowest signal |
 
 *Methodological Comparison with Milestone 4:*
-The SHAP net group rankings agree with Milestone 4 findings in identifying the same primary signals (lead cast, network, content rating, genres) and confirming that **episode count ranks last**. However, exact ranks vary by methodology:
-- Group permutation test on validation: `talent_reach` > `genres` ~ `content_rating` > `network + country` > `episodes`.
-- Leave-one-out (LOO) retraining on validation: removing `network + country` (-0.038 macro-F1) or `genres` (-0.035 macro-F1) hurt performance more than removing `talent_reach` (-0.024 macro-F1) because remaining correlated features could partially compensate for talent track record.
-- SHAP PermutationExplainer on test: splits shared variance across individual features in the fitted tree ensemble.
+The SHAP net group rankings agree with Milestone 4 findings in identifying the same primary signals (lead cast, network, content rating, genres) and confirming that **episode count ranks last**. Exact metrics reflect complementary methodologies:
+- **Permutation Lift on Test:** Adding talent reach to core features produced a **+0.011 ROC-AUC lift** (0.852 to 0.863 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8), matching SHAP identifying lead cast as the #1 global driver.
+- **Priors Pool Comparison (V1 vs V2):** Expanding the talent track record from train-only priors (V2) to rolling full-history priors (V1) produced an ROC-AUC difference of **~0.005** (0.863 vs 0.868 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8).
+- **Ablation vs LOO Differences:** In additive ablations (`06_modeling.ipynb`), talent track record provides the strongest lift over baseline core features (+0.011 ROC-AUC). In exploratory leave-one-out (LOO) validation retraining, removing `network + country` (-0.038 macro-F1) or `genres` (-0.035 macro-F1) hurt performance more than removing `talent_reach` (-0.024 macro-F1) because remaining correlated features could partially compensate for missing talent history.
+- **SHAP PermutationExplainer on Test:** Evaluates the fitted tree ensemble directly, decomposing shared feature interactions into marginal group attributions.
 
 *Stability Check:*
 Re-evaluating with a different random seed (`seed=123`) and an expanded background sample ($N=150$ training dramas) yielded a Spearman rank correlation of **$r = 1.000$** across group attributions, confirming stable global rankings. Note that differences of $\approx 0.01$ in mean net attribution are not statistically distinguishable; ranks between close groups (such as screenwriter vs. country vs. director) should be interpreted as a comparable tier of importance rather than strict hierarchy.
@@ -445,6 +446,11 @@ Rather than presenting raw uncalibrated probabilities, the application maps cali
 
 *(Note: Observed rates on expanding-window out-of-fold validation are in-sample for calibrator fitting; test set rates reported above are strictly out-of-sample).*
 
+> [!NOTE]
+> **Production Regime Interpretation:** In the `complete_info` subset (base rate 0.389), the **Possible** band had an observed High rate of **33.8%**, which is below the subset base rate. This illustrates that likelihood bands reflect calibrated probabilities relative to the entire temporal training distribution, so band names should always be interpreted relative to the cohort baseline rather than absolute population guarantees.
+> 
+> The production explainer returns `band_observed_rate` reporting the held-out observed High rate from out-of-fold calibration data (no test peeking) relative to dramas of the same country and year: **Unlikely** (7.1%), **Possible** (31.3%), **Likely** (58.6%), and **Very likely** (86.4%). Calibrated probabilities are clipped to $[0.02, 0.98]$ to reflect irreducible uncertainty.
+
 ---
 
 ### 7. Audited Local View Case Studies
@@ -503,7 +509,7 @@ All metadata, actual audience reach percentiles, and attributions below are gene
 
 #### Case 4: Missing Talent Attribution  *Shine (Orchestric Ver.) (2025)*
 *Thailand | WeTV | Content Rating: 18+ | 8 Episodes | Saturday*
-- **Creators:** Director: Jean Khamkwan Duangmanee (Missing history) | Screenwriter: Bua Parida, Den Panuwat (Missing history) | Lead Cast: Apo Nattawin, Mile Phakphum
+- **Creators:** Director: Jean Khamkwan Duangmanee (Debut / no earlier history) | Screenwriter: Bua Parida Manomaiphibul, Den Panuwat Inthawat (Debut / no earlier history) | Lead Cast: Apo Nattawin Wattanagitiphat, Mile Phakphum Romsaithong
 - **Audience Metrics:** 17,674 watchers (Thailand cohort size 167). Exact reach: **89.8%** (**90th percentile**, High Tier).
 - **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.1849** | Calibrated $P(\text{High})$: **0.1284** | Band: **Unlikely**
 - **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.0645$) = Raw $P(\text{High})$ ($0.1849$).
@@ -512,8 +518,8 @@ All metadata, actual audience reach percentiles, and attributions below are gene
   2. `weekdays` (**+0.0223**): Saturday primetime broadcast schedule provided positive lift.
   3. `country` (**+0.0072**): Thailand cohort baseline adjustment.
   4. `genres` (**+0.0016**): Comedy / Romance / Political genre mix attribution.
-  5. `talent_screenwriter` (**-0.0071**): Screenwriters had no qualifying pre-release credits under the 12-month rule (missingness penalty).
-  6. `talent_director` (**-0.0080**): Director had no qualifying pre-release credits under the 12-month rule (missingness penalty).
+  5. `talent_screenwriter` (**-0.0071**): Screenwriters are credited on the drama but had no qualifying earlier dramas under the 12-month rule (debut or unindexed works). The model receives a missing reach feature (NaN) and cannot distinguish this from an unlisted credit.
+  6. `talent_director` (**-0.0080**): Director is credited on the drama but had no qualifying earlier dramas under the 12-month rule (debut or unindexed works). The model receives a missing reach feature (NaN) and cannot distinguish this from an unlisted credit.
   7. `network` (**-0.0395**): Broadcaster network 'WeTV' reduced predicted High likelihood.
   8. `episodes` (**-0.0400**): 8-episode short format reduced predicted High likelihood.
   9. `talent_cast` (**-0.1489**): Lead cast prior track record averaged around the **48th percentile** due to Bayesian smoothing over few prior titles.
@@ -544,7 +550,7 @@ All 8 unit and integration tests pass cleanly (`pytest tests/ -v` in ~24s):
 2. **Correlated Features Share Credit:** The PermutationExplainer evaluates feature subsets by permuting columns against the background. When features are correlated (e.g., major networks attaching established star cast), SHAP splits credit between them rather than isolating individual mechanical drivers.
 3. **Blank-Field Penalty:** Missing values carry a significant negative attribution because blank fields in MDL strongly correlate with obscure, low-budget dramas in the training set (a page-completeness artifact), not because omitting a field repels viewers. Creators using the copilot should always fill in all known fields.
 4. **Debut vs. Unlisted Ambiguity:** The system cannot distinguish a genuine industry debut from an established creator whose previous works are unindexed in MDL. Both result in missing reach (`NaN`), which the model treats as unknown history.
-5. **PermutationExplainer Monte Carlo Variance:** Model-agnostic permutation sampling carries modest run-to-run sampling variance (SD $\approx 0.005$–$0.012$ across seeds at `max_evals=1000`). While dominant drivers remain stable, rankings between closely matched secondary drivers may occasionally flip between runs.
+5. **PermutationExplainer Monte Carlo Variance:** Model-agnostic permutation sampling carries modest run-to-run sampling variance (measured SD across 5 seeds at `max_evals=1000` ranges from 0.0002 to 0.0070, with median 0.0014 and typical range 0.001–0.003). While dominant drivers remain stable, rankings between closely matched secondary drivers may occasionally flip between runs.
 6. **Actionable What-If Levers:**
    - *Actionable Levers (Pitch Decisions):* Broadcaster network, primary genre mix, content rating, and lead talent attachments.
    - *Fixed Cohort Baselines:* Country and release year (these define the competitive cohort and percentile baseline, not creative choices).
@@ -590,29 +596,31 @@ Place the raw data file directly in:
 ```
 data/raw/dramas_raw.csv
 ```
-*(A 50-row smoke-test sample `data/raw/sample_50_dramas.csv` is tracked in the repository for quick testing and pipeline verification.)*
+*(A 5-row synthetic schema sample `data/raw/sample_50_dramas.csv` is tracked in the repository with mock placeholder text for schema verification; it does not contain real data).*
 
 ### 4. Rebuilding Artifacts and Running Tests
 
 #### Artifact Dependency Pipeline
-The dataset artifacts and serialized models are generated sequentially through the project notebooks. Note that `data/raw/dramas_raw.csv` is gitignored and excluded from version control.
+All dataset processing and serialized model artifacts are generated strictly through committed notebooks and scripts. Note that the raw scraped dataset `data/raw/dramas_raw.csv` is gitignored and excluded from version control.
 
-| Stage | Notebook / Script | Inputs Read | Artifacts Generated |
-| :---: | :--- | :--- | :--- |
-| **1** | `notebooks/02_cleaning.ipynb` | `data/raw/dramas_raw.csv` | `data/processed/dramas_clean.csv`, `special_or_pilot_flagged_review.csv`, `sample_30_flagged.csv`, `sample_30_unflagged.csv` |
-| **2** | `notebooks/04_target_and_scope.ipynb` | `data/processed/dramas_clean.csv` | `data/processed/dramas_labeled.csv` |
-| **3** | `notebooks/05_feature_engineering.ipynb` | `data/processed/dramas_labeled.csv` | `data/processed/train_features_v1.csv`, `test_features_v1.csv`, `train_features_v2.csv`, `test_features_v2.csv`, `synopses_clean.csv` |
-| **4** | `notebooks/06_modeling.ipynb` | `data/processed/train_features_v2.csv`, `test_features_v2.csv` | Model fitting and evaluation (internal validation, feature ablations, calibration) |
-| **5** | `notebooks/07_explainability.ipynb` | `models/*.joblib`, `data/processed/*` | `models/shap_sample_300.npz`, `models/stab_net_shap.npz`, `docs/shap_group_importance.png` |
+| Step | Notebook / Script | Inputs Read | Artifacts Generated | Status / Execution Notes |
+| :---: | :--- | :--- | :--- | :--- |
+| **1** | `notebooks/02_cleaning.ipynb` | `data/raw/dramas_raw.csv` | `data/processed/dramas_clean.csv`, `special_or_pilot_flagged_review.csv`, `sample_30_flagged.csv`, `sample_30_unflagged.csv` | Parses raw scraping dump, filters valid cohorts (East/SE Asia, 2015–2025, $\ge 10$ episodes), flags pilots/specials. |
+| **2** | `notebooks/03_leakage_review.ipynb` | `data/processed/dramas_clean.csv` | *(Audit report / review)* | Read-only audit classifying features into pre-release safe, post-release leakage, or target candidates. |
+| **3** | `notebooks/04_target_and_scope.ipynb` | `data/processed/dramas_clean.csv` | `data/processed/dramas_labeled.csv` | Computes within-cohort audience reach percentiles (`target_pct`) and 3-class target tiers (`Low`, `Medium`, `High`). |
+| **4** | `notebooks/05_feature_engineering.ipynb` | `data/processed/dramas_labeled.csv` | `data/processed/train_features_v1.csv`<br>`data/processed/test_features_v1.csv`<br>`data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv`<br>`data/processed/synopses_clean.csv` | Computes rolling talent priors (12-month rule) and outputs 47 numeric modeling features. *(Known gap: this feature generation step runs inside notebook Cell 25; there is currently no standalone CLI export script).* |
+| **5** | `src/build_artifacts.py`<br>`python src/build_artifacts.py` | `data/processed/dramas_labeled.csv`<br>`data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv` | `models/headline_model.joblib`<br>`models/isotonic_calibrator.joblib`<br>`models/background_sample.joblib`<br>`models/talent_lookup.joblib`<br>`models/metadata.joblib` | Fits headline GBDT classifier on train (years $\le 2021$), fits isotonic calibrator on expanding-window OOF predictions, draws 100-drama background sample, indexes all 7,535 labeled dramas into talent lookup, and saves artifacts. |
+| **6** | `notebooks/06_modeling.ipynb` | `data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv`<br>`data/processed/train_features_v1.csv`<br>`data/processed/test_features_v1.csv`<br>`data/processed/dramas_labeled.csv` | *(Evaluation metrics and tables)* | Evaluates baseline models, feature group ablations, temporal validation splits, probability calibration, and bootstrap test metrics. |
+| **7** | `notebooks/07_explainability.ipynb` | `models/*.joblib`<br>`data/processed/*` | `models/shap_sample_300.npz`<br>`models/stab_net_shap.npz`<br>`docs/shap_group_importance.png` | Global SHAP group attribution, missingness impact, presence vs. value controls, stability/faithfulness benchmarks, and case studies. |
 
 > [!IMPORTANT]
-> **Rebuild Status & Clean Order Caveat:**
-> While data processing stages 1-3 cleanly reproduce all tables in `data/processed/`, there is currently no standalone command-line script that exports the serialized model artifacts in `models/` (`headline_model.joblib`, `isotonic_calibrator.joblib`, `background_sample.joblib`, `talent_lookup.joblib`, `metadata.joblib`). Those artifacts were serialized directly during Milestone 4 & 5 model training.
-> 
-> **Automated Test Behavior:**
-> When cloned fresh without `models/` or `data/processed/`, the test suite automatically detects missing dependencies via `pytest.mark.skipif` and skips all artifact-dependent tests cleanly with informative diagnostics (`0 errors`). Once `models/` and `data/processed/` artifacts are present, running `pytest tests/ -v` executes all 8 unit and integration tests cleanly.
+> **Fresh-Clone Test Behavior & Artifact Guard:**
+> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 8 tests with:
+> ```
+> Skipping: Missing artifacts or data required for tests: models/headline_model.joblib, models/isotonic_calibrator.joblib, models/background_sample.joblib, models/talent_lookup.joblib, models/metadata.joblib, data/processed/dramas_labeled.csv, data/processed/train_features_v2.csv, data/processed/test_features_v2.csv
+> ```
+> Once `data/processed/` tables are present, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 8 unit and integration tests cleanly in ~24s.
 
----
 
 
 ## 🚀 Project Milestones
