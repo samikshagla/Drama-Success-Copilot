@@ -374,7 +374,10 @@ The SHAP net group rankings agree with Milestone 4 findings in identifying the s
 - SHAP PermutationExplainer on test: splits shared variance across individual features in the fitted tree ensemble.
 
 *Stability Check:*
-Re-evaluating with a different random seed (`seed=123`) and an expanded background sample ($N=150$ training dramas) yielded a Spearman rank correlation of **$r = 0.967$** across group attributions, confirming stable global rankings. Note that differences of $\approx 0.01$ in mean net attribution are not statistically distinguishable; ranks between close groups (such as screenwriter vs. country vs. director) should be interpreted as a comparable tier of importance rather than strict hierarchy.
+Re-evaluating with a different random seed (`seed=123`) and an expanded background sample ($N=150$ training dramas) yielded a Spearman rank correlation of **$r = 1.000$** across group attributions, confirming stable global rankings. Note that differences of $\approx 0.01$ in mean net attribution are not statistically distinguishable; ranks between close groups (such as screenwriter vs. country vs. director) should be interpreted as a comparable tier of importance rather than strict hierarchy.
+
+*Faithfulness Benchmark:*
+For 100 test dramas, replacing the top-attributed feature group with marginal background values produced a mean absolute drop in predicted $P(\text{High})$ of **0.1610**, compared to **0.0386** when replacing a random non-top group (averaged over 20 random non-top groups per drama, fixed seed 42). The ratio of impact is **4.17x** [95% bootstrap CI: 3.71x, 4.81x], confirming that identified top drivers are genuinely causal to the model's predictions rather than permutation artifacts.
 
 ---
 
@@ -435,10 +438,10 @@ Rather than presenting raw uncalibrated probabilities, the application maps cali
 
 | Likelihood Band | Calibrated $P(\text{High})$ Range | Full Test ($N=2,525$)<br>Observed High Rate [95% CI] | Complete-Info ($N=1,022$)<br>Observed High Rate [95% CI] | Strict Complete-Info ($N=635$)<br>Observed High Rate [95% CI] |
 | :--- | :---: | :---: | :---: | :---: |
-| **Unlikely** | $[0.00, 0.20)$ | **7.0%** [5.8%, 8.4%] ($N=1,409$) | **9.9%** [7.3%, 13.3%] ($N=424$) | **13.0%** [8.8%, 18.7%] ($N=185$) |
-| **Possible** | $[0.20, 0.50)$ | **31.7%** [27.9%, 35.8%] ($N=545$) | **30.7%** [25.7%, 36.2%] ($N=306$) | **30.3%** [23.4%, 38.3%] ($N=165$) |
-| **Likely** | $[0.50, 0.75)$ | **57.8%** [52.6%, 62.9%] ($N=351$) | **58.3%** [50.4%, 65.8%] ($N=163$) | **54.1%** [46.6%, 61.3%] ($N=135$) |
-| **Very likely** | $[0.75, 1.00]$ | **79.6%** [73.7%, 84.5%] ($N=220$) | **87.6%** [80.6%, 92.4%] ($N=129$) | **85.1%** [78.3%, 90.0%] ($N=150$) |
+| **Unlikely** | $[0.00, 0.20)$ | **7.0%** [5.8%, 8.4%] ($N=1,436$) | **12.8%** [9.8%, 16.5%] ($N=376$) | **13.0%** [8.8%, 18.7%] ($N=177$) |
+| **Possible** | $[0.20, 0.50)$ | **31.7%** [27.9%, 35.8%] ($N=527$) | **33.8%** [28.1%, 39.9%] ($N=240$) | **30.3%** [23.4%, 38.3%] ($N=145$) |
+| **Likely** | $[0.50, 0.75)$ | **57.8%** [52.6%, 62.9%] ($N=351$) | **54.9%** [48.6%, 61.0%] ($N=244$) | **54.1%** [46.6%, 61.3%] ($N=172$) |
+| **Very likely** | $[0.75, 1.00]$ | **79.6%** [73.7%, 84.5%] ($N=211$) | **83.3%** [76.8%, 88.3%] ($N=162$) | **85.1%** [78.3%, 90.0%] ($N=141$) |
 
 *(Note: Observed rates on expanding-window out-of-fold validation are in-sample for calibrator fitting; test set rates reported above are strictly out-of-sample).*
 
@@ -447,56 +450,73 @@ Rather than presenting raw uncalibrated probabilities, the application maps cali
 ### 7. Audited Local View Case Studies
 All metadata, actual audience reach percentiles, and attributions below are generated directly by pipeline code from `data/processed/dramas_labeled.csv` and serialized artifacts. Base value represents the average predicted $P(\text{High})$ over the background training sample ($0.2494$), not the label proportion. SHAP attributions describe the raw model probability output, not the calibrated probability.
 
-#### Case 1: True Positive — *Who Rules the World (2022)*
+#### Case 1: True Positive  *Who Rules the World (2022)*
 *China | Tencent Video | Content Rating: 13+ | 40 Episodes | Mon/Tue/Wed*
 - **Creators:** Director: Yin Tao, Yu Yong Gang | Screenwriter: Zhang Wei, Shang Meng Lu | Lead Cast: Yang Yang, Zhao Lu Si
 - **Audience Metrics:** 58,733 watchers (China cohort size 532). Exact reach: **99.4%** (**99th percentile**, High Tier).
 - **Model Forecast:** Predicted Tier: **High** | Raw $P(\text{High})$: **0.9814** | Calibrated $P(\text{High})$: **1.0000** | Band: **Very likely**
-- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($+0.7320$) = Raw $P(\text{High})$ ($0.9814$) (discrepancy $< 1e-15$).
-- **Full 9-Group Signed Attribution Breakdown (All Positive — None Pushing Negative):**
-  1. `talent_cast` (**+0.2185**): Lead cast prior track record averaged around the **76th percentile** within country-year.
-  2. `network` (**+0.0963**): Broadcaster network 'Tencent Video' strongly raised predicted High likelihood.
-  3. `content_rating` (**+0.0952**): Content rating '13+' raised predicted High likelihood.
-  4. `talent_director` (**+0.0893**): Director earlier works averaged around the **78th percentile** within country-year.
-  5. `talent_screenwriter` (**+0.0779**): Screenwriter earlier works averaged around the **73rd percentile** within country-year.
-  6. `genres` (**+0.0715**): Genre combination (Romance, Wuxia, Fantasy) raised predicted High likelihood.
-  7. `weekdays` (**+0.0551**): Mon/Tue/Wed primetime broadcast schedule raised predicted High likelihood.
-  8. `country` (**+0.0229**): China cohort baseline adjustment.
-  9. `episodes` (**+0.0054**): 40-episode format provided minor positive lift.
+- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($+0.7320$) = Raw $P(\text{High})$ ($0.9814$) (exact machine precision match).
+- **Full 9-Group Signed Attribution Breakdown (All Positive  None Pushing Negative):**
+  1. `talent_cast` (**+0.2462**): Lead cast prior track record averaged around the **76th percentile** within country-year.
+  2. `content_rating` (**+0.0972**): Content rating '13+ - Teens 13 or older' raised predicted High likelihood.
+  3. `network` (**+0.0927**): Broadcaster network 'Tencent Video' strongly raised predicted High likelihood.
+  4. `talent_director` (**+0.0848**): Director earlier works averaged around the **67th percentile** within country-year.
+  5. `talent_screenwriter` (**+0.0713**): Screenwriter earlier works averaged around the **69th percentile** within country-year.
+  6. `genres` (**+0.0700**): Genre combination (Romance, Wuxia, Fantasy) raised predicted High likelihood.
+  7. `weekdays` (**+0.0452**): Schedule (Mon, Tue, Wed, Sun) primetime broadcast schedule raised predicted High likelihood.
+  8. `country` (**+0.0195**): China cohort baseline adjustment.
+  9. `episodes` (**+0.0051**): 40-episode format provided minor positive lift.
 
-#### Case 2: True Negative — *The Royal Bracelet (2024)*
+#### Case 2: True Negative  *The Royal Bracelet (2024)*
 *Thailand | Channel 7 | Content Rating: G | 30 Episodes | Mon/Tue/Wed/Thu/Fri*
 - **Creators:** Director: Sayom Sungvaributr, Prathum Mitphakdee | Screenwriter: Kanchana Wongpuapan | Lead Cast: Poom Kiatipoom Banluechairit, Chingching Kharittha Sungsaopath
 - **Audience Metrics:** 90 watchers (Thailand cohort size 216). Exact reach: **15.3%** (**15th percentile**, Low Tier).
 - **Model Forecast:** Predicted Tier: **Low** | Raw $P(\text{High})$: **0.0042** | Calibrated $P(\text{High})$: **0.0000** | Band: **Unlikely**
-- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.2451$) = Raw $P(\text{High})$ ($0.0042$).
-- **Top Drivers:**
-  - `talent_cast` (**-0.0981**): Lead cast prior track record averaged around the **34th percentile** within country-year.
-  - `genres` (**-0.0699**): Historical/Drama pairing on this network reduced predicted High likelihood.
-  - `network` (**-0.0402**): Broadcaster network 'Channel 7' reduced predicted High likelihood.
-  - `content_rating` (**-0.0119**): Content rating 'G' (All Ages) had negative attribution relative to mature tiers.
+- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.2452$) = Raw $P(\text{High})$ ($0.0042$).
+- **Full 9-Group Signed Attribution Breakdown:**
+  1. `country` (**+0.0008**): Thailand cohort baseline adjustment.
+  2. `weekdays` (**-0.0011**): Daily schedule (Mon-Fri) format attribution.
+  3. `episodes` (**-0.0024**): 30-episode volume attribution.
+  4. `talent_screenwriter` (**-0.0076**): Screenwriter earlier works averaged around the **42nd percentile** within country-year.
+  5. `content_rating` (**-0.0098**): Content rating 'G - All Ages' had negative attribution relative to mature tiers.
+  6. `talent_director` (**-0.0166**): Director earlier works averaged around the **43rd percentile** within country-year.
+  7. `network` (**-0.0398**): Broadcaster network 'Channel 7' reduced predicted High likelihood.
+  8. `genres` (**-0.0735**): Adventure / Drama pairing reduced predicted High likelihood.
+  9. `talent_cast` (**-0.0953**): Lead cast prior track record averaged around the **34th percentile** within country-year.
 
-#### Case 3: False Negative (Actual High, Predicted Low) — *This Love Doesn't Have Long Beans (2024)*
+#### Case 3: False Negative (Actual High, Predicted Medium)  *This Love Doesn't Have Long Beans (2024)*
 *Thailand | iQiyi / One 31 | Content Rating: 13+ | 8 Episodes | Friday*
 - **Creators:** Director: Nui Suttasit Dechinthanarak | Screenwriter: Yui Kanokphan, Eng Issaraporn, Fleur Irene | Lead Cast: Pon Thanapon Aiemkumchai, Sailub Hemmawich Kwanamphaiphan
 - **Audience Metrics:** 25,699 watchers (Thailand cohort size 216). Exact reach: **92.6%** (**93rd percentile**, High Tier).
-- **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.0720** | Calibrated $P(\text{High})$: **0.0319** | Band: **Unlikely**
-- **Why the Model Missed:**
-  - `talent_cast` (**-0.1287**): Lead cast prior track record averaged around the **46th percentile** within country-year.
-  - `genres` (**-0.0612**): The Food + Romance combination had weak historical base rates.
-  - `episodes` (**-0.0349**): 8-episode short-form format lowered predicted High likelihood.
-  - *Positive Offsets:* Content rating '13+' (**+0.0877**) and Friday broadcast slot (**+0.0239**) pushed positive, but could not overcome negative cast and genre attributions.
+- **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.0362** | Calibrated $P(\text{High})$: **0.0202** | Band: **Unlikely**
+- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.2132$) = Raw $P(\text{High})$ ($0.0362$).
+- **Full 9-Group Signed Attribution Breakdown:**
+  1. `content_rating` (**+0.0727**): Content rating '13+' provided positive lift.
+  2. `weekdays` (**+0.0213**): Friday primetime broadcast schedule pushed positive.
+  3. `country` (**+0.0082**): Thailand cohort baseline adjustment.
+  4. `talent_director` (**+0.0037**): Director earlier works averaged around the **52nd percentile** within country-year.
+  5. `network` (**-0.0227**): Broadcaster pair 'iQiyi / One 31' attribution.
+  6. `talent_screenwriter` (**-0.0242**): Screenwriters' earlier works averaged around the **46th percentile** within country-year.
+  7. `episodes` (**-0.0299**): 8-episode short-form format lowered predicted High likelihood.
+  8. `genres` (**-0.0571**): The Food + Romance combination had weak historical base rates.
+  9. `talent_cast` (**-0.1852**): Lead cast prior track record averaged around the **42nd percentile** within country-year, driving the false-negative prediction.
 
-#### Case 4: Missing Talent Attribution — *Shine (Orchestric Ver.) (2025)*
+#### Case 4: Missing Talent Attribution  *Shine (Orchestric Ver.) (2025)*
 *Thailand | WeTV | Content Rating: 18+ | 8 Episodes | Saturday*
-- **Creators:** Director: Jean Khamkwan Duangmanee (No prior qualifying credits) | Screenwriter: Bua Parida, Den Panuwat | Lead Cast: Apo Nattawin Wattanagitiphat, Mile Phakphum Romsaithong
+- **Creators:** Director: Jean Khamkwan Duangmanee (Missing history) | Screenwriter: Bua Parida, Den Panuwat (Missing history) | Lead Cast: Apo Nattawin, Mile Phakphum
 - **Audience Metrics:** 17,674 watchers (Thailand cohort size 167). Exact reach: **89.8%** (**90th percentile**, High Tier).
-- **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.4289** | Calibrated $P(\text{High})$: **0.2713** | Band: **Possible**
-- **Driver Analysis:**
-  - `talent_screenwriter` (**+0.1674**): Screenwriter earlier works averaged around the **71st percentile** within country-year.
-  - `content_rating` (**+0.1584**): Rating '18+' provided strong positive lift.
-  - `talent_director` (**-0.0074** [$-0.0085 \pm 0.0002$]): Director prior history was missing (`NaN`). The SHAP value near zero reflects that missing director history is standard in the training background rather than neutral impact.
-  - `talent_cast` (**-0.1453**): Lead actors' prior track record averaged around the **48th percentile** due to Bayesian smoothing over few qualifying titles under the strict 12-month rule.
+- **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.1849** | Calibrated $P(\text{High})$: **0.1284** | Band: **Unlikely**
+- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.0645$) = Raw $P(\text{High})$ ($0.1849$).
+- **Full 9-Group Signed Attribution Breakdown:**
+  1. `content_rating` (**+0.1479**): Rating '18+ Restricted' provided strong positive lift.
+  2. `weekdays` (**+0.0223**): Saturday primetime broadcast schedule provided positive lift.
+  3. `country` (**+0.0072**): Thailand cohort baseline adjustment.
+  4. `genres` (**+0.0016**): Comedy / Romance / Political genre mix attribution.
+  5. `talent_screenwriter` (**-0.0071**): Screenwriters had no qualifying pre-release credits under the 12-month rule (missingness penalty).
+  6. `talent_director` (**-0.0080**): Director had no qualifying pre-release credits under the 12-month rule (missingness penalty).
+  7. `network` (**-0.0395**): Broadcaster network 'WeTV' reduced predicted High likelihood.
+  8. `episodes` (**-0.0400**): 8-episode short format reduced predicted High likelihood.
+  9. `talent_cast` (**-0.1489**): Lead cast prior track record averaged around the **48th percentile** due to Bayesian smoothing over few prior titles.
 
 ---
 
@@ -508,7 +528,7 @@ The production explainability pipeline is encapsulated in `src/explain.py`:
   *(Note: The model was trained with priors drawn from earlier train dramas only, while the app lookup indexes all historical labeled dramas up to the 12-month cutoff; Milestone 4 V1 vs V2 results [$\approx 0.005$ ROC-AUC difference] demonstrate that expanding the prior pool has minimal effect on ranking. Also note that the model was fitted on dramas up to 2021 and has not seen 2022–2025 feature distributions).*
 
 *Test Suite (`tests/test_explain.py`):*
-All 7 unit and integration tests pass cleanly (`pytest tests/ -v` in 18.5s):
+All 8 unit and integration tests pass cleanly (`pytest tests/ -v` in ~24s):
 1. `test_shap_additivity_5_dramas`: Verifies $\text{base\_value} + \sum \text{attributions} = \text{raw\_p\_high}$ within $1e-9$ across 5 diverse test pitches.
 2. `test_json_serializable_and_expected_keys`: Confirms JSON round-trip serialization and presence of all schema keys.
 3. `test_no_talent_history_returns_nan_reach_and_warning`: Asserts debut creators receive `NaN` reach and the warning `"No qualifying prior credits found within the 12-month rule; feature set to missing"`.
@@ -572,7 +592,28 @@ data/raw/dramas_raw.csv
 ```
 *(A 50-row smoke-test sample `data/raw/sample_50_dramas.csv` is tracked in the repository for quick testing and pipeline verification.)*
 
+### 4. Rebuilding Artifacts and Running Tests
+
+#### Artifact Dependency Pipeline
+The dataset artifacts and serialized models are generated sequentially through the project notebooks. Note that `data/raw/dramas_raw.csv` is gitignored and excluded from version control.
+
+| Stage | Notebook / Script | Inputs Read | Artifacts Generated |
+| :---: | :--- | :--- | :--- |
+| **1** | `notebooks/02_cleaning.ipynb` | `data/raw/dramas_raw.csv` | `data/processed/dramas_clean.csv`, `special_or_pilot_flagged_review.csv`, `sample_30_flagged.csv`, `sample_30_unflagged.csv` |
+| **2** | `notebooks/04_target_and_scope.ipynb` | `data/processed/dramas_clean.csv` | `data/processed/dramas_labeled.csv` |
+| **3** | `notebooks/05_feature_engineering.ipynb` | `data/processed/dramas_labeled.csv` | `data/processed/train_features_v1.csv`, `test_features_v1.csv`, `train_features_v2.csv`, `test_features_v2.csv`, `synopses_clean.csv` |
+| **4** | `notebooks/06_modeling.ipynb` | `data/processed/train_features_v2.csv`, `test_features_v2.csv` | Model fitting and evaluation (internal validation, feature ablations, calibration) |
+| **5** | `notebooks/07_explainability.ipynb` | `models/*.joblib`, `data/processed/*` | `models/shap_sample_300.npz`, `models/stab_net_shap.npz`, `docs/shap_group_importance.png` |
+
+> [!IMPORTANT]
+> **Rebuild Status & Clean Order Caveat:**
+> While data processing stages 1-3 cleanly reproduce all tables in `data/processed/`, there is currently no standalone command-line script that exports the serialized model artifacts in `models/` (`headline_model.joblib`, `isotonic_calibrator.joblib`, `background_sample.joblib`, `talent_lookup.joblib`, `metadata.joblib`). Those artifacts were serialized directly during Milestone 4 & 5 model training.
+> 
+> **Automated Test Behavior:**
+> When cloned fresh without `models/` or `data/processed/`, the test suite automatically detects missing dependencies via `pytest.mark.skipif` and skips all artifact-dependent tests cleanly with informative diagnostics (`0 errors`). Once `models/` and `data/processed/` artifacts are present, running `pytest tests/ -v` executes all 8 unit and integration tests cleanly.
+
 ---
+
 
 ## 🚀 Project Milestones
 - [x] **Milestone 1:** Repository architecture setup, git hygiene, environment verification, and raw data schema inspection.

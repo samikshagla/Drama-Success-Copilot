@@ -13,6 +13,7 @@ Tests cover:
 
 import json
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -29,6 +30,33 @@ from src.features import (
     prepare_talent_columns,
     build_talent_inverted_index,
     temporal_train_test_split,
+)
+
+repo_root = Path(__file__).resolve().parent.parent
+
+REQUIRED_MODEL_FILES = [
+    repo_root / "models/headline_model.joblib",
+    repo_root / "models/isotonic_calibrator.joblib",
+    repo_root / "models/background_sample.joblib",
+    repo_root / "models/talent_lookup.joblib",
+    repo_root / "models/metadata.joblib",
+]
+REQUIRED_DATA_FILES = [
+    repo_root / "data/processed/dramas_labeled.csv",
+    repo_root / "data/processed/train_features_v2.csv",
+    repo_root / "data/processed/test_features_v2.csv",
+]
+
+missing_models = [str(p) for p in REQUIRED_MODEL_FILES if not p.exists()]
+missing_data = [str(p) for p in REQUIRED_DATA_FILES if not p.exists()]
+missing_artifacts = missing_models + missing_data
+
+pytestmark = pytest.mark.skipif(
+    bool(missing_artifacts),
+    reason=(
+        f"Missing artifacts or data required for tests: {', '.join(missing_artifacts)}. "
+        "Follow README 'Rebuilding artifacts and running tests' section to generate them."
+    ),
 )
 
 
@@ -328,3 +356,48 @@ def test_no_prior_used_starts_after_planned_start_minus_365_days(artifacts):
     assert np.isclose(expected_smoothed, actual_smoothed), (
         f"12-month rule failed: expected {expected_smoothed}, got {actual_smoothed}"
     )
+
+
+def test_saved_model_reproduces_test_metrics(artifacts):
+    """
+    (8) Saved model reproduces headline test metrics:
+    Re-scores test_df (N=2,525) with headline model & isotonic calibrator in models/
+    and confirms ROC-AUC, raw Brier, and calibrated Brier match README headline values.
+    """
+    from sklearn.metrics import roc_auc_score, brier_score_loss, f1_score
+
+    train_df, test_df = load_modeling_data("v2")
+    assert len(train_df) == 5010, f"Expected 5,010 train rows, found {len(train_df)}"
+    assert len(test_df) == 2525, f"Expected 2,525 test rows, found {len(test_df)}"
+
+    clf = artifacts["headline_model"]
+    iso = artifacts["isotonic_calibrator"]
+    meta = artifacts["metadata"]
+
+    features = meta["features"]
+    cat_cols = meta["cat_cols"]
+    enc = meta["ordinal_encoder"]
+
+    X_test = test_df[features].copy()
+    X_test[cat_cols] = enc.transform(X_test[cat_cols].astype(str))
+    X_test_num = X_test.astype(np.float64)
+
+    assert list(X_test_num.columns) == list(features), "Feature column order mismatch"
+    high_idx = meta["high_class_idx"]
+    raw_p = clf.predict_proba(X_test_num)[:, high_idx]
+    cal_p = iso.predict(raw_p)
+    preds = clf.predict(X_test_num)
+
+    y_bin = (test_df["target_tier"].values == "High").astype(int)
+    y_tier = test_df["target_tier"].values
+
+    roc = roc_auc_score(y_bin, raw_p)
+    brier_raw = brier_score_loss(y_bin, raw_p)
+    brier_cal = brier_score_loss(y_bin, cal_p)
+    f1 = f1_score(y_tier, preds, average="macro")
+
+    assert np.isclose(roc, 0.8627, atol=0.002), f"ROC-AUC mismatch: {roc}"
+    assert np.isclose(brier_raw, 0.1309, atol=0.0005), f"Raw Brier mismatch: {brier_raw}"
+    assert np.isclose(brier_cal, 0.1273, atol=0.0005), f"Calibrated Brier mismatch: {brier_cal}"
+    assert np.isclose(f1, 0.6557, atol=0.005), f"Macro-F1 mismatch: {f1}"
+

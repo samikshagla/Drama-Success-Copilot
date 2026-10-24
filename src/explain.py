@@ -50,13 +50,21 @@ GROUP_DEFS = {
 }
 
 
-def load_artifacts(models_dir: Union[str, Path] = "models") -> Dict[str, Any]:
-    """Load serialized model artifacts from models directory."""
+def load_artifacts(models_dir: Union[str, Path] = None) -> Dict[str, Any]:
+    """Load serialized model artifacts from models directory, anchored at repo root."""
     global _CACHED_ARTIFACTS
     if _CACHED_ARTIFACTS is not None:
         return _CACHED_ARTIFACTS
 
-    p = Path(models_dir)
+    repo_root = Path(__file__).resolve().parent.parent
+    if models_dir is None:
+        p = repo_root / "models"
+    else:
+        p = Path(models_dir)
+        if not p.is_absolute() and not p.exists():
+            if (repo_root / p).exists():
+                p = repo_root / p
+
     clf = joblib.load(p / "headline_model.joblib")
     iso_cal = joblib.load(p / "isotonic_calibrator.joblib")
     bg = joblib.load(p / "background_sample.joblib")
@@ -296,6 +304,9 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
     enc = meta["ordinal_encoder"]
     df_row[cat_cols] = enc.transform(df_row[cat_cols].astype(str))
 
+    assert list(df_row.columns) == list(features), (
+        f"Feature order mismatch: {list(df_row.columns)} vs {features}"
+    )
     return df_row.astype(np.float64), warnings
 
 
@@ -400,11 +411,12 @@ def explain_drama(
 
     # 1. Build numeric feature row
     X_num, warnings = build_feature_row(inputs, artifacts)
+    assert list(X_num.columns) == list(features), "Feature order mismatch with fit-time features"
 
-    # 2. Model predictions
-    raw_p_high = float(clf.predict_proba(X_num.values)[:, high_idx][0])
+    # 2. Model predictions (always pass DataFrame with matching feature names and order)
+    raw_p_high = float(clf.predict_proba(X_num)[:, high_idx][0])
     cal_p_high = float(iso_cal.predict([raw_p_high])[0])
-    pred_tier = str(clf.predict(X_num.values)[0])
+    pred_tier = str(clf.predict(X_num)[0])
     cal_p_rounded_5pct = float(round(cal_p_high * 20.0) / 20.0)
 
     # 3. Likelihood band (4 tiers based on calibrated P(High))
@@ -418,7 +430,14 @@ def explain_drama(
         likelihood_band = "Very likely"
 
     # 4. SHAP Permutation Explainer
-    predict_high_proba = lambda x: clf.predict_proba(x)[:, high_idx]
+    def predict_high_proba(arr):
+        if isinstance(arr, pd.DataFrame):
+            df_arr = arr
+        else:
+            df_arr = pd.DataFrame(arr, columns=features)
+        assert list(df_arr.columns) == list(features), "Feature columns do not match fit-time features"
+        return clf.predict_proba(df_arr)[:, high_idx]
+
     explainer = shap.explainers.PermutationExplainer(predict_high_proba, bg_sample, seed=seed)
     sv = explainer(X_num, max_evals=max_evals)
 
