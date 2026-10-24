@@ -344,6 +344,195 @@ These results **support** the conclusion that the model learns legitimate pre-re
 
 ---
 
+## 🔍 Milestone 5: Model Explainability & Production Explainer (SHAP)
+
+### 1. Explainer Compatibility & Architecture
+TreeExplainer does not support this model (`HistGradientBoostingClassifier`), so a model-agnostic `PermutationExplainer` was used with a background sample of 100 training dramas evaluated on 300 test dramas.
+*Environment Note:* SHAP introduces heavy compilation and runtime dependencies (`numba`, `llvmlite`). These are maintained in the primary development `requirements.txt`, and a slim inference-focused requirements file will be provided for deployment.
+
+### 2. Global Feature Group Attribution (Net Group Effect)
+Feature attribution is computed as the **net group effect**: for each drama, the sum of SHAP values inside the group is calculated first, and its absolute magnitude is averaged across test dramas ($N=300$). This prevents groups with many binary flags (such as the 30 one-hot genres) from inflating their importance relative to compact groups.
+
+![SHAP Group Importance](docs/shap_group_importance.png)
+
+| Rank | Feature Group | Features Included | Mean \|Net SHAP\| | Signed Mean SHAP | Agreement with Milestone 4 |
+| :---: | :--- | :--- | :---: | :---: | :--- |
+| **1** | **Lead Cast Reach** (`talent_cast`) | `cast_prior_reach_max`, `mean` | **0.0846** | +0.0223 | Same top driver as permutation test (+0.011 ROC lift) |
+| **2** | **Broadcaster Network** (`network`) | `original_network` | **0.0777** | +0.0066 | Top LOO retraining drop (-0.038 macro-F1) |
+| **3** | **Content Rating** (`content_rating`)| `content_rating` | **0.0734** | +0.0186 | Strong standalone category signal (18+ vs G) |
+| **4** | **Genres** (`genres`) | 30 one-hot genre indicators | **0.0646** | -0.0112 | 2nd LOO retraining drop (-0.035 macro-F1) |
+| **5** | **Screenwriter Reach** (`screenwriter`)| `screenwriter_prior_reach_max`, `mean`| **0.0325** | +0.0184 | Secondary creator reach signal |
+| **6** | **Country Cohort** (`country`) | `country` | **0.0319** | -0.0119 | Baseline cohort adjustment |
+| **7** | **Director Reach** (`director`) | `director_prior_reach_max`, `mean` | **0.0316** | +0.0117 | Secondary creator reach signal |
+| **8** | **Broadcast Schedule** (`weekdays`) | 7 weekday indicators | **0.0266** | +0.0085 | Primetime slot signal (Fri/Sat/Sun) |
+| **9** | **Episode Count** (`episodes`) | `episodes` | **0.0172** | -0.0062 | Consistent with Milestone 4: episode count carries lowest signal |
+
+*Methodological Comparison with Milestone 4:*
+The SHAP net group rankings agree with Milestone 4 findings in identifying the same primary signals (lead cast, network, content rating, genres) and confirming that **episode count ranks last**. However, exact ranks vary by methodology:
+- Group permutation test on validation: `talent_reach` > `genres` ~ `content_rating` > `network + country` > `episodes`.
+- Leave-one-out (LOO) retraining on validation: removing `network + country` (-0.038 macro-F1) or `genres` (-0.035 macro-F1) hurt performance more than removing `talent_reach` (-0.024 macro-F1) because remaining correlated features could partially compensate for talent track record.
+- SHAP PermutationExplainer on test: splits shared variance across individual features in the fitted tree ensemble.
+
+*Stability Check:*
+Re-evaluating with a different random seed (`seed=123`) and an expanded background sample ($N=150$ training dramas) yielded a Spearman rank correlation of **$r = 0.967$** across group attributions, confirming stable global rankings. Note that differences of $\approx 0.01$ in mean net attribution are not statistically distinguishable; ranks between close groups (such as screenwriter vs. country vs. director) should be interpreted as a comparable tier of importance rather than strict hierarchy.
+
+---
+
+### 3. Missingness Attribution & Presence vs. Value Controls
+In observational data, missing metadata is not missing at random. Evaluating signed SHAP values across known versus missing rows on the test sample reveals that **known fields push predictions up while missing fields push them down**:
+
+| Feature Group | Known Rows ($N$) | Known Signed Mean SHAP | Missing Rows ($N$) | Missing Signed Mean SHAP | Net Gap (Known $-$ Missing) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Content Rating** | 146 | +0.0922 | 154 | -0.0512 | **+0.1433** |
+| **Genres** | 292 | -0.0083 | 8 | -0.1147 | **+0.1064** |
+| **Broadcaster Network** | 249 | +0.0242 | 51 | -0.0792 | **+0.1034** |
+| **Broadcast Schedule** | 264 | +0.0197 | 36 | -0.0735 | **+0.0932** |
+| **Screenwriter Reach** | 130 | +0.0514 | 170 | -0.0069 | **+0.0583** |
+| **Director Reach** | 138 | +0.0413 | 162 | -0.0135 | **+0.0548** |
+| **Lead Cast Reach** | 214 | +0.0222 | 86 | +0.0227 | -0.0004 |
+
+*Presence vs. Value Counterfactual Experiments ($N = 1,022$ Complete-Info Test Dramas):*
+To isolate how much the model penalizes a missing field versus rewarding specific feature values, we performed controlled counterfactual replacements on all $N=1,022$ `complete_info` test dramas:
+1. **(i) Set to Missing (`NaN`):** Setting network to `NaN` dropped predicted $P(\text{High})$ by **-0.1706** (causing 29.7% of dramas to flip predicted tier); content rating to `NaN` dropped $P(\text{High})$ by **-0.0958** (12.2% tier flips); weekdays to `NaN` dropped $P(\text{High})$ by **-0.1720** (26.5% tier flips); talent reach (all 6 features) to `NaN` dropped $P(\text{High})$ by **-0.1022** (31.1% tier flips).
+2. **(ii) Random Known Value (20 draws from country distribution):** Replacing network with a random known broadcaster from the same country changed $P(\text{High})$ by only **-0.0280** (20.4% flips); content rating by **+0.0456** (11.3% flips); weekdays by **-0.0025** (4.3% flips); talent reach by **-0.0255** (36.5% flips).
+3. **(iii) Most Common Value (Mode within country):** Replacing with the mode changed network by **-0.1076** (20.5% flips); content rating by **+0.0387** (11.6% flips); weekdays by **-0.0064** (3.7% flips); talent reach by **-0.0084** (36.4% flips).
+4. **Presence Reward (ii $-$ i):** The gap between having a typical random value versus a blank entry is **+0.1426** for network, **+0.1414** for content rating, **+0.1695** for weekdays, and **+0.0767** for talent.
+
+*Plain-Language Finding:* **The model predicts lower $P(\text{High})$ when a field is blank than when it holds a typical value.** Blank fields in MDL data predominantly occur in obscure or low-reach productions; the model learned that blank fields correlate with low audience reach (a page-completeness artifact), not that blank fields themselves repel viewers. Furthermore, for talent with no qualifying prior history, SHAP near zero (e.g. director SHAP of -0.0085 and screenwriter SHAP of -0.0072 in *Shine*) does **not** indicate the model treats missing talent as neutral; rather, `NaN` is the typical background value in the training data (68% director and 75% screenwriter entries are missing).
+
+---
+
+### 4. Rare Category Audit: Content Rating 18+
+In Case 4 (*Shine*), the `18+` content rating contributes a substantial positive attribution (+0.1584), despite representing only 82 training titles. We audited class distributions across all ratings:
+
+| Rating Category | Train $N$ | Train High Rate (95% Wilson CI) | Test $N$ | Test High Rate (95% Wilson CI) | Sample-300 $N$ | Sample-300 Mean SHAP |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **18+ Restricted** | 82 | **64.6%** [53.8%, 74.1%] | 163 | **60.1%** [52.5%, 67.3%] | 14 | **+0.1759** |
+| **13+ Teens** | 536 | 49.8% [45.6%, 54.0%] | 323 | 45.5% [40.2%, 51.0%] | 30 | +0.1218 |
+| **15+ Teens** | 820 | 44.3% [40.9%, 47.7%] | 477 | 35.8% [31.7%, 40.3%] | 66 | +0.1146 |
+| **G (All Ages)** | 438 | 24.7% [20.9%, 28.9%] | 261 | 8.8% [5.9%, 12.9%] | 36 | -0.0062 |
+
+*Finding:* Dramas rated `18+` achieve a 60–65% High audience-reach rate in both training and test cohorts—far higher than family-friendly `G` titles (8.8% on test). The model's large positive attribution accurately captures this empirical conditional reach distribution.
+
+---
+
+### 5. Probability Calibration in App Production Regime
+The production application operates in a regime where creators submit pitches with all core fields completed. To verify calibration in this deployment context, we evaluated the headline model (trained on all 5,010 training rows with isotonic calibration fitted on pooled expanding-window out-of-fold predictions) on `complete_info` ($N=1,022$) and strict ($N=635$) test slices. This rule was declared prior to test inspection:
+
+| Model Pipeline & Regime | Complete-Info Test ($N=1,022$)<br>Mean Pred vs Obs (Bias) | Complete-Info<br>ECE / Brier (Base = 0.238) | Strict Complete-Info ($N=635$)<br>Mean Pred vs Obs (Bias) | Strict Complete-Info<br>ECE / Brier (Base = 0.247) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Headline Model (Raw)** | 0.447 vs 0.389 (+0.057) | 0.0860 / 0.1801 | 0.517 vs 0.441 (+0.076) | 0.0807 / 0.1822 |
+| **Headline Model (Isotonic - Selected)** | **0.370 vs 0.389 (-0.019)** | **0.0504 / 0.1742** | **0.439 vs 0.441 (-0.002)** | **0.0432 / 0.1725** |
+| *Complete-Info Only Model (Raw)* | 0.463 vs 0.389 (+0.074) | 0.0878 / 0.1873 | 0.532 vs 0.441 (+0.091) | 0.0907 / 0.1872 |
+| *Complete-Info Only Model (Isotonic)* | 0.421 vs 0.389 (+0.032) | 0.0412 / 0.1787 | 0.482 vs 0.441 (+0.041) | 0.0460 / 0.1798 |
+
+*Reliability Finding:* The headline model with isotonic calibration shows substantially lower bias on strict complete-info dramas (**-0.002** vs. +0.041 for the complete-info-only model) and achieves the best overall Brier score (**0.1725** vs. baseline 0.247). Training on all available data allows the gradient booster to learn more robust decision boundaries while the isotonic post-processor successfully corrects probability overconfidence.
+
+---
+
+### 6. Production Likelihood Bands
+Rather than presenting raw uncalibrated probabilities, the application maps calibrated $P(\text{High})$ into four standard likelihood bands. Observed High rates evaluated out-of-sample across test slices confirm clean monotonic separation:
+
+| Likelihood Band | Calibrated $P(\text{High})$ Range | Full Test ($N=2,525$)<br>Observed High Rate [95% CI] | Complete-Info ($N=1,022$)<br>Observed High Rate [95% CI] | Strict Complete-Info ($N=635$)<br>Observed High Rate [95% CI] |
+| :--- | :---: | :---: | :---: | :---: |
+| **Unlikely** | $[0.00, 0.20)$ | **7.0%** [5.8%, 8.4%] ($N=1,409$) | **9.9%** [7.3%, 13.3%] ($N=424$) | **13.0%** [8.8%, 18.7%] ($N=185$) |
+| **Possible** | $[0.20, 0.50)$ | **31.7%** [27.9%, 35.8%] ($N=545$) | **30.7%** [25.7%, 36.2%] ($N=306$) | **30.3%** [23.4%, 38.3%] ($N=165$) |
+| **Likely** | $[0.50, 0.75)$ | **57.8%** [52.6%, 62.9%] ($N=351$) | **58.3%** [50.4%, 65.8%] ($N=163$) | **54.1%** [46.6%, 61.3%] ($N=135$) |
+| **Very likely** | $[0.75, 1.00]$ | **79.6%** [73.7%, 84.5%] ($N=220$) | **87.6%** [80.6%, 92.4%] ($N=129$) | **85.1%** [78.3%, 90.0%] ($N=150$) |
+
+*(Note: Observed rates on expanding-window out-of-fold validation are in-sample for calibrator fitting; test set rates reported above are strictly out-of-sample).*
+
+---
+
+### 7. Audited Local View Case Studies
+All metadata, actual audience reach percentiles, and attributions below are generated directly by pipeline code from `data/processed/dramas_labeled.csv` and serialized artifacts. Base value represents the average predicted $P(\text{High})$ over the background training sample ($0.2494$), not the label proportion. SHAP attributions describe the raw model probability output, not the calibrated probability.
+
+#### Case 1: True Positive — *Who Rules the World (2022)*
+*China | Tencent Video | Content Rating: 13+ | 40 Episodes | Mon/Tue/Wed*
+- **Creators:** Director: Yin Tao, Yu Yong Gang | Screenwriter: Zhang Wei, Shang Meng Lu | Lead Cast: Yang Yang, Zhao Lu Si
+- **Audience Metrics:** 58,733 watchers (China cohort size 532). Exact reach: **99.4%** (**99th percentile**, High Tier).
+- **Model Forecast:** Predicted Tier: **High** | Raw $P(\text{High})$: **0.9814** | Calibrated $P(\text{High})$: **1.0000** | Band: **Very likely**
+- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($+0.7320$) = Raw $P(\text{High})$ ($0.9814$) (discrepancy $< 1e-15$).
+- **Full 9-Group Signed Attribution Breakdown (All Positive — None Pushing Negative):**
+  1. `talent_cast` (**+0.2185**): Lead cast prior track record averaged around the **76th percentile** within country-year.
+  2. `network` (**+0.0963**): Broadcaster network 'Tencent Video' strongly raised predicted High likelihood.
+  3. `content_rating` (**+0.0952**): Content rating '13+' raised predicted High likelihood.
+  4. `talent_director` (**+0.0893**): Director earlier works averaged around the **78th percentile** within country-year.
+  5. `talent_screenwriter` (**+0.0779**): Screenwriter earlier works averaged around the **73rd percentile** within country-year.
+  6. `genres` (**+0.0715**): Genre combination (Romance, Wuxia, Fantasy) raised predicted High likelihood.
+  7. `weekdays` (**+0.0551**): Mon/Tue/Wed primetime broadcast schedule raised predicted High likelihood.
+  8. `country` (**+0.0229**): China cohort baseline adjustment.
+  9. `episodes` (**+0.0054**): 40-episode format provided minor positive lift.
+
+#### Case 2: True Negative — *The Royal Bracelet (2024)*
+*Thailand | Channel 7 | Content Rating: G | 30 Episodes | Mon/Tue/Wed/Thu/Fri*
+- **Creators:** Director: Sayom Sungvaributr, Prathum Mitphakdee | Screenwriter: Kanchana Wongpuapan | Lead Cast: Poom Kiatipoom Banluechairit, Chingching Kharittha Sungsaopath
+- **Audience Metrics:** 90 watchers (Thailand cohort size 216). Exact reach: **15.3%** (**15th percentile**, Low Tier).
+- **Model Forecast:** Predicted Tier: **Low** | Raw $P(\text{High})$: **0.0042** | Calibrated $P(\text{High})$: **0.0000** | Band: **Unlikely**
+- **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.2451$) = Raw $P(\text{High})$ ($0.0042$).
+- **Top Drivers:**
+  - `talent_cast` (**-0.0981**): Lead cast prior track record averaged around the **34th percentile** within country-year.
+  - `genres` (**-0.0699**): Historical/Drama pairing on this network reduced predicted High likelihood.
+  - `network` (**-0.0402**): Broadcaster network 'Channel 7' reduced predicted High likelihood.
+  - `content_rating` (**-0.0119**): Content rating 'G' (All Ages) had negative attribution relative to mature tiers.
+
+#### Case 3: False Negative (Actual High, Predicted Low) — *This Love Doesn't Have Long Beans (2024)*
+*Thailand | iQiyi / One 31 | Content Rating: 13+ | 8 Episodes | Friday*
+- **Creators:** Director: Nui Suttasit Dechinthanarak | Screenwriter: Yui Kanokphan, Eng Issaraporn, Fleur Irene | Lead Cast: Pon Thanapon Aiemkumchai, Sailub Hemmawich Kwanamphaiphan
+- **Audience Metrics:** 25,699 watchers (Thailand cohort size 216). Exact reach: **92.6%** (**93rd percentile**, High Tier).
+- **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.0720** | Calibrated $P(\text{High})$: **0.0319** | Band: **Unlikely**
+- **Why the Model Missed:**
+  - `talent_cast` (**-0.1287**): Lead cast prior track record averaged around the **46th percentile** within country-year.
+  - `genres` (**-0.0612**): The Food + Romance combination had weak historical base rates.
+  - `episodes` (**-0.0349**): 8-episode short-form format lowered predicted High likelihood.
+  - *Positive Offsets:* Content rating '13+' (**+0.0877**) and Friday broadcast slot (**+0.0239**) pushed positive, but could not overcome negative cast and genre attributions.
+
+#### Case 4: Missing Talent Attribution — *Shine (Orchestric Ver.) (2025)*
+*Thailand | WeTV | Content Rating: 18+ | 8 Episodes | Saturday*
+- **Creators:** Director: Jean Khamkwan Duangmanee (No prior qualifying credits) | Screenwriter: Bua Parida, Den Panuwat | Lead Cast: Apo Nattawin Wattanagitiphat, Mile Phakphum Romsaithong
+- **Audience Metrics:** 17,674 watchers (Thailand cohort size 167). Exact reach: **89.8%** (**90th percentile**, High Tier).
+- **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.4289** | Calibrated $P(\text{High})$: **0.2713** | Band: **Possible**
+- **Driver Analysis:**
+  - `talent_screenwriter` (**+0.1674**): Screenwriter earlier works averaged around the **71st percentile** within country-year.
+  - `content_rating` (**+0.1584**): Rating '18+' provided strong positive lift.
+  - `talent_director` (**-0.0074** [$-0.0085 \pm 0.0002$]): Director prior history was missing (`NaN`). The SHAP value near zero reflects that missing director history is standard in the training background rather than neutral impact.
+  - `talent_cast` (**-0.1453**): Lead actors' prior track record averaged around the **48th percentile** due to Bayesian smoothing over few qualifying titles under the strict 12-month rule.
+
+---
+
+### 8. Production Module & Automated Testing (`src/explain.py`)
+The production explainability pipeline is encapsulated in `src/explain.py`:
+- `explain_drama(inputs, artifacts=None, seed=42, max_evals=1000)`: Takes plain pitch parameters, builds the 47-feature numeric representation, queries the talent lookup under the 12-month rule, generates predictions, likelihood band, and computes net group SHAP attributions with human-readable rationale strings. Returns a compact, fully JSON-serializable dictionary.
+- `build_feature_row(inputs, artifacts)`: Standalone feature constructor replicating the exact training data transformations.
+- `models/talent_lookup.joblib`: Indexes all 7,535 labeled dramas ($1,929$ directors, $1,992$ screenwriters, $8,132$ actors) up to `planned_start_date - 365 days`. Stored lookup contains only normalized names, dates, and target percentiles (no raw text).
+  *(Note: The model was trained with priors drawn from earlier train dramas only, while the app lookup indexes all historical labeled dramas up to the 12-month cutoff; Milestone 4 V1 vs V2 results [$\approx 0.005$ ROC-AUC difference] demonstrate that expanding the prior pool has minimal effect on ranking. Also note that the model was fitted on dramas up to 2021 and has not seen 2022–2025 feature distributions).*
+
+*Test Suite (`tests/test_explain.py`):*
+All 7 unit and integration tests pass cleanly (`pytest tests/ -v` in 18.5s):
+1. `test_shap_additivity_5_dramas`: Verifies $\text{base\_value} + \sum \text{attributions} = \text{raw\_p\_high}$ within $1e-9$ across 5 diverse test pitches.
+2. `test_json_serializable_and_expected_keys`: Confirms JSON round-trip serialization and presence of all schema keys.
+3. `test_no_talent_history_returns_nan_reach_and_warning`: Asserts debut creators receive `NaN` reach and the warning `"No qualifying prior credits found within the 12-month rule; feature set to missing"`.
+4. `test_blank_network_returns_warning`: Asserts blank broadcaster produces `"Network is blank; encoded as missing"` and missing encoding.
+5. `test_two_seeds_agree_on_sign_and_top_group_for_3_dramas`: Confirms random seeds 42 and 123 identify the identical top driver group and sign.
+6. `test_feature_builder_reproduces_training_table_values_for_20_random_test_dramas`: Validates that `build_feature_row` reconstructs all 47 features for 20 test dramas matching pre-computed features to machine precision.
+7. `test_no_prior_used_starts_after_planned_start_minus_365_days`: Verifies strict exclusion of prior credits within 365 days of planned premiere.
+
+---
+
+### 9. Methodological Limitations & Advisory Guardrails
+1. **Model Explanations, Not Causal Effects:** SHAP explains why the statistical model made a specific prediction given its training correlations. Changing a feature in a pitch (such as attaching a specific broadcaster) does not guarantee real-world audience reach changes; feature attributions are observational associations, not causal treatment effects.
+2. **Correlated Features Share Credit:** The PermutationExplainer evaluates feature subsets by permuting columns against the background. When features are correlated (e.g., major networks attaching established star cast), SHAP splits credit between them rather than isolating individual mechanical drivers.
+3. **Blank-Field Penalty:** Missing values carry a significant negative attribution because blank fields in MDL strongly correlate with obscure, low-budget dramas in the training set (a page-completeness artifact), not because omitting a field repels viewers. Creators using the copilot should always fill in all known fields.
+4. **Debut vs. Unlisted Ambiguity:** The system cannot distinguish a genuine industry debut from an established creator whose previous works are unindexed in MDL. Both result in missing reach (`NaN`), which the model treats as unknown history.
+5. **PermutationExplainer Monte Carlo Variance:** Model-agnostic permutation sampling carries modest run-to-run sampling variance (SD $\approx 0.005$–$0.012$ across seeds at `max_evals=1000`). While dominant drivers remain stable, rankings between closely matched secondary drivers may occasionally flip between runs.
+6. **Actionable What-If Levers:**
+   - *Actionable Levers (Pitch Decisions):* Broadcaster network, primary genre mix, content rating, and lead talent attachments.
+   - *Fixed Cohort Baselines:* Country and release year (these define the competitive cohort and percentile baseline, not creative choices).
+   - *Low-Leverage Elements:* Episode count carries minimal predictive weight ($\text{Mean } |\text{Net SHAP}| = 0.017$) and should not be relied upon to drive audience reach tiers.
+7. **Pre-Release Content Rating Unreliability:** Content ratings are frequently assigned late in post-production by broadcast censorship boards. Early pitch evaluations should treat content rating with sensitivity testing across plausible alternatives (e.g., evaluating both 13+ and 15+).
+
+---
+
 ## ⚙️ Setup & Installation
 
 ### 1. Environment Setup
@@ -394,7 +583,7 @@ data/raw/dramas_raw.csv
   - [x] **Step 2E:** Target variable definition, distribution analysis, and scope cutoff selection (`notebooks/04_target_and_scope.ipynb`).
 - [x] **Milestone 3:** Leakage-free feature engineering (`notebooks/05_feature_engineering.ipynb`, `src/features.py`).
 - [x] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
-- [ ] **Milestone 5:** Model interpretability with SHAP.
+- [x] **Milestone 5:** Model interpretability with SHAP.
 - [ ] **Milestone 6:** RAG retriever for comparable dramas.
 - [ ] **Milestone 7:** What-if simulator and LLM agent integration.
 - [ ] **Milestone 8:** FastAPI, Dockerization, and Hugging Face Spaces deployment.
