@@ -217,11 +217,11 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
 
 | Model / Baseline | Full Test Accuracy | Full Test Macro-F1 | Full Test ROC-AUC [base: 0.253] | Full Test PR-AUC [base: 0.253] | complete_info ROC-AUC [base: 0.389] | strict ROC-AUC [base: 0.441] |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Majority Class (Medium)** | 0.499 [0.479, 0.521] | 0.222 [0.215, 0.229] | 0.500 [0.500, 0.500] | 0.253 [0.237, 0.270] | 0.500 [0.500, 0.500] | 0.500 [0.500, 0.500] |
-| **Stratified Random** | 0.365 [0.345, 0.381] | 0.324 [0.306, 0.342] | 0.509 [0.485, 0.533] | 0.257 [0.237, 0.277] | 0.505 [0.471, 0.538] | 0.503 [0.463, 0.548] |
-| **Country-Only Baseline** | 0.499 [0.479, 0.521] | 0.222 [0.215, 0.229] | 0.501 [0.477, 0.526] | 0.253 [0.237, 0.270] | 0.408 [0.375, 0.442] | 0.428 [0.385, 0.473] |
+| **Majority Class (Medium)** | 0.499 [0.479, 0.521] | 0.222 [0.216, 0.228] | 0.500 [0.500, 0.500] | 0.253 [0.237, 0.270] | 0.500 [0.500, 0.500] | 0.500 [0.500, 0.500] |
+| **Stratified Random** | 0.365 [0.345, 0.381] | 0.324 [0.304, 0.341] | 0.509 [0.483, 0.533] | 0.257 [0.236, 0.280] | 0.512 [0.474, 0.545] | 0.503 [0.463, 0.548] |
+| **Country-Only Baseline** | 0.499 [0.479, 0.521] | 0.222 [0.216, 0.228] | 0.501 [0.477, 0.526] | 0.253 [0.234, 0.272] | 0.408 [0.376, 0.441] | 0.428 [0.385, 0.473] |
 | **Page Completeness Only** | 0.528 [0.509, 0.548] | 0.502 [0.483, 0.524] | 0.736 [0.714, 0.754] | 0.408 [0.375, 0.437] | 0.569 [0.538, 0.599] | 0.500 [0.500, 0.500] |
-| **Headline Model (core + talent_reach)** | **0.659 [0.637, 0.679]** | **0.655 [0.634, 0.676]** | **0.863 [0.847, 0.878]** | **0.676 [0.638, 0.710]** | **0.811 [0.787, 0.835]** | **0.821 [0.788, 0.854]** |
+| **Headline Model (core + talent_reach)** | **0.659 [0.637, 0.677]** | **0.656 [0.633, 0.674]** | **0.863 [0.846, 0.878]** | **0.675 [0.638, 0.711]** | **0.811 [0.787, 0.835]** | **0.821 [0.788, 0.854]** |
 
 *Notes on Baselines:*
 - Country-only is near chance by construction because the target is standardized as a percentile within each country-year cohort. On `complete_info`, Country-only yields 0.408 ROC-AUC as a selection artifact (High-tier proportion differs by country inside that slice: 44.7% in Korea vs 22.9% in Japan), not true negative signal.
@@ -234,7 +234,7 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
 
 | Slice / Country | $N$ | High Base Rate | Accuracy [95% CI] | Macro-F1 [95% CI] | ROC-AUC (High) [95% CI] | PR-AUC (High) [95% CI] | Spearman ($r_s$) [95% CI] |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Full Test Set** | **2,525** | **0.253** | **0.659 [0.637, 0.679]** | **0.655 [0.634, 0.676]** | **0.863 [0.847, 0.878]** | **0.676 [0.638, 0.710]** | **+0.751 [0.735, 0.768]** |
+| **Full Test Set** | **2,525** | **0.253** | **0.659 [0.637, 0.677]** | **0.656 [0.633, 0.674]** | **0.863 [0.846, 0.878]** | **0.675 [0.638, 0.711]** | **+0.752 [0.735, 0.768]** |
 | **complete_info Subset** | **1,022** | **0.389** | **0.681 [0.654, 0.709]** | **0.675 [0.639, 0.709]** | **0.811 [0.787, 0.835]** | **0.739 [0.702, 0.779]** | **+0.664 [0.627, 0.700]** |
 | **complete_info_strict Subset** | **635** | **0.441** | **0.676 [0.638, 0.711]** | **0.643 [0.584, 0.697]** | **0.821 [0.788, 0.854]** | **0.792 [0.745, 0.836]** | **+0.676 [0.625, 0.723]** |
 | South Korea (Full Test) | 751 | 0.253 | 0.670 [0.634, 0.703] | 0.669 [0.633, 0.701] | 0.888 [0.862, 0.911] | 0.752 [0.690, 0.807] | +0.788 [0.758, 0.814] |
@@ -259,8 +259,8 @@ Implemented in `src/features.py` and validated in `notebooks/05_feature_engineer
 | Feature Configuration | Full Test ROC-AUC [base: 0.253] | Full Test PR-AUC [base: 0.253] | complete_info ROC-AUC [base: 0.389] | complete_info PR-AUC [base: 0.389] | strict ROC-AUC [base: 0.441] | strict PR-AUC [base: 0.441] | $\Delta$ ROC vs Headline (Full Test) | $\Delta$ Macro-F1 vs Headline (Full Test) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **1. core** | 0.852 [0.836, 0.867] | 0.642 [0.606, 0.682] | 0.796 [0.770, 0.828] | 0.704 [0.660, 0.751] | 0.807 [0.772, 0.839] | 0.745 [0.685, 0.798] | -0.011 [-0.019, -0.001] * | -0.021 [-0.039, -0.003] * |
-| **2. core + talent_reach (Headline)** | **0.863 [0.847, 0.878]** | **0.676 [0.638, 0.710]** | **0.811 [0.787, 0.835]** | **0.739 [0.702, 0.779]** | **0.821 [0.788, 0.854]** | **0.792 [0.745, 0.836]** | **[Reference]** | **[Reference]** |
-| **3. core + reach + missingness** | 0.867 [0.851, 0.882] | 0.686 [0.649, 0.721] | 0.818 [0.792, 0.843] | 0.751 [0.714, 0.791] | 0.825 [0.792, 0.857] | 0.796 [0.748, 0.841] | +0.004 [-0.000, +0.008] | +0.012 [+0.001, +0.024] * |
+| **2. core + talent_reach (Headline)** | **0.863 [0.846, 0.878]** | **0.675 [0.638, 0.711]** | **0.811 [0.787, 0.835]** | **0.739 [0.702, 0.779]** | **0.821 [0.788, 0.854]** | **0.792 [0.745, 0.836]** | **[Reference]** | **[Reference]** |
+| **3. core + reach + missingness** | 0.867 [0.851, 0.881] | 0.685 [0.649, 0.720] | 0.818 [0.792, 0.843] | 0.751 [0.714, 0.791] | 0.825 [0.792, 0.857] | 0.796 [0.748, 0.841] | +0.004 [-0.000, +0.008] | +0.012 [+0.001, +0.024] * |
 | **4. core + reach + talent_exp** | 0.878 [0.863, 0.892] | 0.694 [0.658, 0.727] | 0.834 [0.808, 0.859] | 0.760 [0.723, 0.801] | 0.839 [0.810, 0.868] | 0.803 [0.752, 0.846] | +0.015 [+0.010, +0.021] * | +0.015 [+0.002, +0.029] * |
 | **5. core + reach + text** | 0.868 [0.853, 0.884] | 0.691 [0.654, 0.727] | 0.816 [0.792, 0.841] | 0.748 [0.712, 0.788] | 0.830 [0.800, 0.861] | 0.803 [0.753, 0.845] | +0.006 [+0.000, +0.011] * | +0.006 [-0.009, +0.022] |
 | **6. talent_reach only** | 0.769 [0.747, 0.788] | 0.516 [0.474, 0.555] | 0.721 [0.691, 0.750] | 0.595 [0.548, 0.647] | 0.730 [0.689, 0.770] | 0.661 [0.602, 0.724] | -0.094 [-0.110, -0.079] * | -0.193 [-0.217, -0.171] * |
@@ -311,8 +311,8 @@ These results **support** the conclusion that the model learns legitimate pre-re
 
 | Metric / Decile Bin | Raw Model | Platt Scaling | Isotonic Regression (Selected) |
 | :--- | :---: | :---: | :---: |
-| **Full Test Brier Score** (baseline = 0.1888) | 0.1309 | 0.1296 | **0.1273** |
-| **Equal-Count ECE (Deciles)** | 0.0487 | 0.0515 | **0.0360** |
+| **Full Test Brier Score** (baseline = 0.1888) | 0.1309 | 0.1292 | **0.1272** |
+| **Equal-Count ECE (Deciles)** | 0.0493 | 0.0443 | **0.0318** |
 | **Brier Improvement vs Raw** (500 resamples) | [Reference] | +0.0013 [-0.0018, +0.0044] | **+0.0035 [+0.0006, +0.0064] \*** |
 | **ECE Improvement vs Raw** (500 resamples) | [Reference] | -0.0028 [-0.0157, +0.0174] | +0.0126 [-0.0045, +0.0336] |
 | Decile 1 ($N=253$) | Pred: 0.008, Obs: 0.008 (+0.001) | Pred: 0.043, Obs: 0.012 (+0.031) | Pred: 0.000, Obs: 0.000 (+0.000) |
@@ -357,7 +357,7 @@ Feature attribution is computed as the **net group effect**: for each drama, the
 
 | Rank | Feature Group | Features Included | Mean \|Net SHAP\| | Signed Mean SHAP | Agreement with Milestone 4 |
 | :---: | :--- | :--- | :---: | :---: | :--- |
-| **1** | **Lead Cast Reach** (`talent_cast`) | `cast_prior_reach_max`, `mean` | **0.0846** | +0.0223 | Same top driver as permutation test (+0.011 ROC lift) |
+| **1** | **Lead Cast Reach** (`talent_cast`) | `cast_prior_reach_max`, `mean` | **0.0846** | +0.0223 | Same top driver as core -> headline ablation lift (+0.011 ROC lift) |
 | **2** | **Broadcaster Network** (`network`) | `original_network` | **0.0777** | +0.0066 | Top LOO retraining drop (-0.038 macro-F1) |
 | **3** | **Content Rating** (`content_rating`)| `content_rating` | **0.0734** | +0.0186 | Strong standalone category signal (18+ vs G) |
 | **4** | **Genres** (`genres`) | 30 one-hot genre indicators | **0.0646** | -0.0112 | 2nd LOO retraining drop (-0.035 macro-F1) |
@@ -369,9 +369,9 @@ Feature attribution is computed as the **net group effect**: for each drama, the
 
 *Methodological Comparison with Milestone 4:*
 The SHAP net group rankings agree with Milestone 4 findings in identifying the same primary signals (lead cast, network, content rating, genres) and confirming that **episode count ranks last**. Exact metrics reflect complementary methodologies:
-- **Permutation Lift on Test:** Adding talent reach to core features produced a **+0.011 ROC-AUC lift** (0.852 to 0.863 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8), matching SHAP identifying lead cast as the #1 global driver.
+- **core -> headline ablation lift:** Adding talent reach to core features produced a **+0.011 ROC-AUC lift** (0.852 to 0.863 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8), matching SHAP identifying lead cast as the #1 global driver.
 - **Priors Pool Comparison (V1 vs V2):** Expanding the talent track record from train-only priors (V2) to rolling full-history priors (V1) produced an ROC-AUC difference of **~0.005** (0.863 vs 0.868 on full test, confirmed by `notebooks/06_modeling.ipynb` Cell 8).
-- **Ablation vs LOO Differences:** In additive ablations (`06_modeling.ipynb`), talent track record provides the strongest lift over baseline core features (+0.011 ROC-AUC). In exploratory leave-one-out (LOO) validation retraining, removing `network + country` (-0.038 macro-F1) or `genres` (-0.035 macro-F1) hurt performance more than removing `talent_reach` (-0.024 macro-F1) because remaining correlated features could partially compensate for missing talent history.
+- **Ablation vs LOO Differences:** In additive ablations (`06_modeling.ipynb` Cell 8), talent track record provides the strongest lift over baseline core features (+0.011 ROC-AUC, +0.021 Macro-F1). In leave-one-out (LOO) retraining, removing `network + country` (-0.038 to -0.051 Macro-F1) or `genres` (-0.035 to -0.047 Macro-F1) drops performance more than removing `talent_reach` (-0.024 Macro-F1; 0.656 to 0.632 on full test) or `content_rating` (-0.021 Macro-F1), while removing `episodes` has virtually zero impact (-0.002 Macro-F1). This confirms that remaining correlated features can partially compensate for missing talent history, but cannot fully compensate for broad cohort and genre baselines.
 - **SHAP PermutationExplainer on Test:** Evaluates the fitted tree ensemble directly, decomposing shared feature interactions into marginal group attributions.
 
 *Stability Check:*
@@ -447,7 +447,7 @@ Rather than presenting raw uncalibrated probabilities, the application maps cali
 *(Note: Observed rates on expanding-window out-of-fold validation are in-sample for calibrator fitting; test set rates reported above are strictly out-of-sample).*
 
 > [!NOTE]
-> **Production Regime Interpretation:** In the `complete_info` subset (base rate 0.389), the **Possible** band had an observed High rate of **33.8%**, which is below the subset base rate. This illustrates that likelihood bands reflect calibrated probabilities relative to the entire temporal training distribution, so band names should always be interpreted relative to the cohort baseline rather than absolute population guarantees.
+> **Production Regime Interpretation:** Bands are defined on the full population (base rate 0.253); in `complete_info` (base rate 0.389) the Possible band (20-50%) can sit below that subset's base rate. Likelihood bands reflect calibrated probabilities relative to the entire temporal training distribution, so band names should always be interpreted relative to the cohort baseline rather than absolute population guarantees.
 > 
 > The production explainer returns `band_observed_rate` reporting the held-out observed High rate from out-of-fold calibration data (no test peeking) relative to dramas of the same country and year: **Unlikely** (7.1%), **Possible** (31.3%), **Likely** (58.6%), and **Very likely** (86.4%). Calibrated probabilities are clipped to $[0.02, 0.98]$ to reflect irreducible uncertainty.
 
@@ -601,15 +601,20 @@ data/raw/dramas_raw.csv
 ### 4. Rebuilding Artifacts and Running Tests
 
 #### Artifact Dependency Pipeline
-All dataset processing and serialized model artifacts are generated strictly through committed notebooks and scripts. Note that the raw scraped dataset `data/raw/dramas_raw.csv` is gitignored and excluded from version control.
+All dataset processing and serialized model artifacts are generated through committed notebooks and scripts.
 
-| Step | Notebook / Script | Inputs Read | Artifacts Generated | Status / Execution Notes |
+> [!IMPORTANT]
+> **Data Availability & Rebuild Scope:**
+> The raw scraping dump `data/raw/dramas_raw.csv` (~15.35 MB) is gitignored and **not published** in the repository to maintain clean git hygiene. Consequently, outside users cannot rerun Step 0 or Step 1 to regenerate `data/processed/` tables from scratch. Instead, the final processed tables (`dramas_labeled.csv`, `train_features_v2.csv`, `test_features_v2.csv`) are tracked in the repository, enabling users to independently rebuild all serialized `models/` artifacts via `python src/build_artifacts.py` and run the entire test suite.
+
+| Step | Notebook / Script | Inputs Read | Artifacts Generated | Description from Code / Execution Notes |
 | :---: | :--- | :--- | :--- | :--- |
-| **1** | `notebooks/02_cleaning.ipynb` | `data/raw/dramas_raw.csv` | `data/processed/dramas_clean.csv`, `special_or_pilot_flagged_review.csv`, `sample_30_flagged.csv`, `sample_30_unflagged.csv` | Parses raw scraping dump, filters valid cohorts (East/SE Asia, 2015–2025, $\ge 10$ episodes), flags pilots/specials. |
+| **0** | `mdl_scraper/`<br>`spiders/dramas*.py`<br>`merge.py`<br>`convert_to_csv.py` | MyDramaList web pages | `data/raw/dramas_raw.csv` (~15.35 MB, 10,400 rows) | Scrapy spiders paginate MDL drama directory; merge script deduplicates URLs; convert script exports tabular CSV. *(Raw dataset is gitignored and not published in the repository).* |
+| **1** | `notebooks/02_cleaning.ipynb` | `data/raw/dramas_raw.csv` | `data/processed/dramas_clean.csv`<br>`special_or_pilot_flagged_review.csv`<br>`sample_30_flagged.csv`<br>`sample_30_unflagged.csv` | Type conversion, sentinel replacement (`popularity == 99999` $\to$ NaN, `episodes == 0` $\to$ NaN + flag), date parsing (`start_date`, `end_date`, `release_year`), and pilot/special regex detection (`is_special_or_pilot`). **No row filtering: all 10,400 rows are retained.** |
 | **2** | `notebooks/03_leakage_review.ipynb` | `data/processed/dramas_clean.csv` | *(Audit report / review)* | Read-only audit classifying features into pre-release safe, post-release leakage, or target candidates. |
-| **3** | `notebooks/04_target_and_scope.ipynb` | `data/processed/dramas_clean.csv` | `data/processed/dramas_labeled.csv` | Computes within-cohort audience reach percentiles (`target_pct`) and 3-class target tiers (`Low`, `Medium`, `High`). |
+| **3** | `notebooks/04_target_and_scope.ipynb` | `data/processed/dramas_clean.csv` | `data/processed/dramas_labeled.csv` (7,535 rows) | Applies **6+ episode scope filter** (`episodes >= 6`, dropping short-run titles and missing episode rows), excludes small cohorts (< 50 dramas per `(country, release_year)` cohort), and calculates within-cohort audience reach percentiles (`target_pct`) and 3-class target tiers (`Low`, `Medium`, `High`). |
 | **4** | `notebooks/05_feature_engineering.ipynb` | `data/processed/dramas_labeled.csv` | `data/processed/train_features_v1.csv`<br>`data/processed/test_features_v1.csv`<br>`data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv`<br>`data/processed/synopses_clean.csv` | Computes rolling talent priors (12-month rule) and outputs 47 numeric modeling features. *(Known gap: this feature generation step runs inside notebook Cell 25; there is currently no standalone CLI export script).* |
-| **5** | `src/build_artifacts.py`<br>`python src/build_artifacts.py` | `data/processed/dramas_labeled.csv`<br>`data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv` | `models/headline_model.joblib`<br>`models/isotonic_calibrator.joblib`<br>`models/background_sample.joblib`<br>`models/talent_lookup.joblib`<br>`models/metadata.joblib` | Fits headline GBDT classifier on train (years $\le 2021$), fits isotonic calibrator on expanding-window OOF predictions, draws 100-drama background sample, indexes all 7,535 labeled dramas into talent lookup, and saves artifacts. |
+| **5** | `src/build_artifacts.py`<br>`python src/build_artifacts.py` | `data/processed/dramas_labeled.csv`<br>`data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv` | `models/headline_model.joblib`<br>`models/isotonic_calibrator.joblib`<br>`models/background_sample.joblib`<br>`models/talent_lookup.joblib`<br>`models/metadata.joblib` | Fits headline GBDT classifier on train (years $\le 2021$), fits isotonic calibrator on expanding-window OOF predictions, draws 100-drama background sample, indexes all 7,535 labeled dramas into talent lookup, and saves artifacts in ~8s. |
 | **6** | `notebooks/06_modeling.ipynb` | `data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv`<br>`data/processed/train_features_v1.csv`<br>`data/processed/test_features_v1.csv`<br>`data/processed/dramas_labeled.csv` | *(Evaluation metrics and tables)* | Evaluates baseline models, feature group ablations, temporal validation splits, probability calibration, and bootstrap test metrics. |
 | **7** | `notebooks/07_explainability.ipynb` | `models/*.joblib`<br>`data/processed/*` | `models/shap_sample_300.npz`<br>`models/stab_net_shap.npz`<br>`docs/shap_group_importance.png` | Global SHAP group attribution, missingness impact, presence vs. value controls, stability/faithfulness benchmarks, and case studies. |
 
