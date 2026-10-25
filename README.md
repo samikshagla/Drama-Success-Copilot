@@ -6,7 +6,7 @@
 - **Split:** Strictly time-split — trained on 5,010 dramas released through 2021, tested on 2,525 dramas released 2022 or later.
 - **Results:** ROC-AUC for High tier vs. not-High is **0.863** on the full test set ($N=2,525$) and **0.811** on `complete_info` ($N=1,022$, all credits listed), against page-completeness-only baselines of 0.736 and 0.569.
 - **Limitations:** Observational page-completeness bias on uncurated pages, associational forecasts rather than causal pitch levers, scraper coverage gaps (partial years in China/Japan/Korea), and target measures relative MDL audience reach rather than broadcast ratings or revenue.
-- **Status:** Milestones 1–5 done (data audit, leakage review, feature engineering, modeling & calibration, SHAP explainability module); retriever, agent, and deployment planned.
+- **Status:** Milestones 1–6 done (data audit, leakage review, feature engineering, modeling & calibration, SHAP explainability, similar-drama retriever); agent and deployment planned.
 
 ---
 
@@ -554,7 +554,7 @@ The production explainability pipeline is encapsulated in `src/explain.py`:
   *(Note: The model was trained with priors drawn from earlier train dramas only, while the app lookup indexes all historical labeled dramas up to the 12-month cutoff; Milestone 4 V1 vs V2 results [$\approx 0.005$ ROC-AUC difference] demonstrate that expanding the prior pool has minimal effect on ranking. Also note that the model was fitted on dramas up to 2021 and has not seen 2022–2025 feature distributions).*
 
 *Test Suite (`tests/test_explain.py`):*
-All 9 unit and integration tests pass cleanly (`pytest tests/ -v` in under a minute):
+All 9 unit and integration tests pass cleanly (`pytest tests/test_explain.py -v` in under a minute):
 1. `test_shap_additivity_5_dramas`: Verifies $\text{base\_value} + \sum \text{attributions} = \text{raw\_p\_high}$ within $1e-9$ across 5 diverse test pitches.
 2. `test_json_serializable_and_expected_keys`: Confirms JSON round-trip serialization and presence of all schema keys.
 3. `test_no_talent_history_returns_nan_reach_and_warning`: Asserts debut creators receive `NaN` reach and the warning `"No qualifying prior credits found within the 12-month rule; feature set to missing"`.
@@ -565,7 +565,7 @@ All 9 unit and integration tests pass cleanly (`pytest tests/ -v` in under a min
 
 ---
 
-### 9. Methodological Limitations & Advisory Guardrails
+### 9. Methodological Limitations & Advisory Guardrails (SHAP & Predictive Modeling)
 1. **Model Explanations, Not Causal Effects:** SHAP explains why the statistical model made a specific prediction given its training correlations. Changing a feature in a pitch (such as attaching a specific broadcaster) does not guarantee real-world audience reach changes; feature attributions are observational associations, not causal treatment effects.
 2. **Correlated Features Share Credit:** The PermutationExplainer evaluates feature subsets by permuting columns against the background. When features are correlated (e.g., major networks attaching established star cast), SHAP splits credit between them rather than isolating individual mechanical drivers.
 3. **Blank-Field Penalty:** Missing values carry a significant negative attribution because blank fields in MDL strongly correlate with obscure, low-budget dramas in the training set (a page-completeness artifact), not because omitting a field repels viewers. Creators using the copilot should always fill in all known fields.
@@ -578,6 +578,119 @@ All 9 unit and integration tests pass cleanly (`pytest tests/ -v` in under a min
 7. **Pre-Release Content Rating Unreliability:** Content ratings are frequently assigned late in post-production by broadcast censorship boards. Early pitch evaluations should treat content rating with sensitivity testing across plausible alternatives (e.g., evaluating both 13+ and 15+).
 
 ---
+
+### 10. Milestone 6: Similar-Drama Retriever (Semantic Embeddings & Comparables)
+
+#### Architecture & Index Design
+The similar-drama retrieval pipeline is encapsulated in `src/retriever.py` with standalone index builder `src/build_retriever.py`:
+- **Vector Index (`models/retriever_embeddings.npy`):** Float32 unit-normalized matrix of shape $(6,497, 384)$ ($\approx 9.52$ MB, gitignored). Nearest neighbors are computed via exact NumPy dot product ($sim = Q \cdot C^T$), taking $\approx 1$ ms with zero external C++ vector database dependencies.
+- **Embedding Model:** `sentence-transformers/all-MiniLM-L6-v2` (revision hash `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`, Apache-2.0 license, weights cached in `~/.cache/huggingface/hub` outside the repository).
+- **Metadata Table (`models/retriever_metadata.parquet`):** Compact Parquet table ($\approx 344$ KB, gitignored) storing `name`, `release_year`, `country`, `network` (null for unlisted, never the string `"Unknown"`), `target_tier`, `target_pct`, `url`, and `start_date`. **Synopsis text is strictly omitted** from the index, metadata, and runtime return payloads.
+- **12-Month Maturity & Date Rules:** Candidate pool strictly enforces `eff_candidate_start <= query_planned_start - 365 days` and query self-exclusion. Candidate dramas lacking an explicit `start_date` (35 in the corpus) are conservatively assigned Dec 31 of their release year (`f"{release_year}-12-31"`). Queries passed as a 4-digit year are conservatively assigned Jan 1 (`f"{release_year}-01-01"`).
+- **Deterministic Tie-Breaking:** Ties in similarity scores are broken deterministically by ascending corpus index via `np.lexsort((corpus_indices, -sims))`.
+
+---
+
+#### Systematic Evaluation on Test Queries ($N = 2,252$, Released 2022–2025)
+
+##### (a) Genre Jaccard Overlap & Franchise Matching (500 bootstrap resamples, seed 42)
+Mean genre Jaccard similarity between query drama and top-5 retrieved neighbors:
+
+| Method | Genre Jaccard (All Top-5) [95% CI] | Genre Jaccard (Excl. Franchise) [95% CI] | Franchise Matches in Top-5 (%) |
+| :--- | :---: | :---: | :---: |
+| **Random Pool Baseline** | 0.204 [0.199, 0.209] | 0.204 [0.199, 0.209] | 0.00% |
+| **TF-IDF (10k vocabulary)** | 0.277 [0.270, 0.283] | 0.275 [0.269, 0.281] | 0.35% |
+| **Sentence Embeddings** | **0.306 [0.300, 0.312]** | **0.305 [0.299, 0.311]** | 0.28% |
+
+*Paired Bootstrap Differences (same resampled queries; 500 resamples, seed 42):*
+- **Overall ($N = 2,252$):** Embeddings minus TF-IDF: **+0.029 [+0.023, +0.035]**; TF-IDF minus Random: **+0.072 [+0.066, +0.079]**. Both intervals strictly exclude 0.
+- **South Korea ($N = 690$):** Embeddings minus TF-IDF: **+0.034 [+0.024, +0.043]**; TF-IDF minus Random: **+0.070 [+0.060, +0.080]**.
+- **China ($N = 420$):** Embeddings minus TF-IDF: **+0.022 [+0.010, +0.036]**; TF-IDF minus Random: **+0.062 [+0.050, +0.075]**.
+- **Japan ($N = 401$):** Embeddings minus TF-IDF: **+0.035 [+0.020, +0.048]**; TF-IDF minus Random: **+0.078 [+0.061, +0.092]**.
+- **Thailand ($N = 741$):** Embeddings minus TF-IDF: **+0.026 [+0.015, +0.037]**; TF-IDF minus Random: **+0.078 [+0.067, +0.089]**.
+
+---
+
+##### (c) Outcome Diagnostic: Correlation with Historical Reach
+> **Diagnostic only; not evidence that the retriever predicts success**
+
+*1. Spearman Rank Correlation (Mean `target_pct` of Top-10 vs. Query `target_pct`; 500 bootstrap resamples, seed 42):*
+
+| Method / Baseline | All Test Queries ($N = 2,252$) | `complete_info` Test ($N = 997$)* |
+| :--- | :---: | :---: |
+| **Random Pool Baseline** | -0.026 [-0.068, +0.014] | -0.007 [-0.070, +0.056] |
+| **TF-IDF** | +0.251 [+0.211, +0.296] | +0.258 [+0.197, +0.313] |
+| **Sentence Embeddings** | +0.291 [+0.253, +0.330] | +0.293 [+0.232, +0.349] |
+| **Genre-Only Retriever** | **+0.356 [+0.324, +0.395]** | **+0.317 [+0.259, +0.372]** |
+
+*\*Note: $N = 997$ for `complete_info` because only test dramas with a synopsis can serve as retriever queries (vs. $N = 1,022$ in tabular modeling).*
+
+*Paired Differences on Spearman Correlation (500 resamples, seed 42):*
+- **All Test Queries ($N = 2,252$):**
+  - Embeddings minus TF-IDF: **+0.040 [-0.011, +0.088]** (within noise).
+  - Embeddings minus Genre-Only: **-0.065 [-0.115, -0.019]** (Genre-only correlation is higher).
+  - Genre-Only minus TF-IDF: **+0.105 [+0.053, +0.160]** (Genre-only correlation is higher).
+- **`complete_info` ($N = 997$):**
+  - Embeddings minus TF-IDF: **+0.035 [-0.024, +0.100]** (within noise).
+  - Embeddings minus Genre-Only: **-0.024 [-0.095, +0.052]** (within noise).
+  - Genre-Only minus TF-IDF: **+0.059 [-0.011, +0.139]** (within noise).
+
+*Key Finding:* Broad macro-genre tags carry stronger baseline reach correlation than synopsis text alone, which is why a deterministic genre-only retriever achieves higher reach correlation (+0.356) than textual embeddings (+0.291) and TF-IDF (+0.251). Text retrieval discovers thematic and situational analogs, not pure reach proxies.
+
+*2. Secondary Subgroup Views (Warning: Selects on Outcome):*
+- **High-Tier Queries ($N = 638$, conditioning on High outcome):**
+  - Candidate Pool Base Rate: **29.8% [29.8%, 29.8%]**
+  - Random Top-5: **30.3% [28.8%, 31.6%]**
+  - TF-IDF Top-5: **33.6% [31.9%, 35.3%]**
+  - Genre-Only Top-5: **39.8% [37.9%, 41.7%]**
+  - Sentence Embeddings Top-5: **40.9% [39.1%, 42.8%]**
+- **Low-Tier Queries ($N = 404$, symmetric view conditioning on Low outcome):**
+  - Candidate Pool Base Rate: **15.9% [15.8%, 15.9%]**
+  - Random Top-5: **15.0% [13.3%, 16.8%]**
+  - Sentence Embeddings Top-5: **19.1% [17.0%, 20.9%]**
+  - TF-IDF Top-5: **20.9% [18.9%, 22.9%]**
+  - Genre-Only Top-5: **29.0% [26.4%, 31.6%]**
+
+---
+
+##### (b) Human-Judged Precision@5 (Pending)
+> **Status: PENDING LABELING (Single Labeler)**
+> 
+> A blind sample of 30 randomly selected test dramas (split into three local files: `data/processed/retriever_blind_labeling_part1.csv` [102 rows], `part2.csv` [96 rows], `part3.csv` [102 rows]) contains 300 blinded query-neighbor pairs (including 10 consistency check duplicates).
+> - **Evaluation Rubric:** Relevant ($1$) = the central premise, dramatic situation, or core conflict is similar (e.g., deadly survival game, workplace romance between rivals, parallel timeline murder mystery); sharing only a genre tag or country is $0$.
+> - Precision@5 per method (TF-IDF vs. Sentence Embeddings) will be computed from the submitted labels via the answer key.
+
+---
+
+#### Methodological Limitations & Guardrails for Milestone 6
+1. **Documentation Selection Bias (No-Synopsis Dramas Cannot Be Retrieved):**
+   Across all 7,535 labeled dramas:
+   - Dramas **with synopsis** ($N = 6,497$, 86.22% of corpus): **29.29% High tier, 54.19% Medium, 16.52% Low**.
+   - Dramas **without synopsis** ($N = 1,038$, 13.78% of corpus): **0.19% High tier, 23.51% Medium, 76.30% Low**.
+   Because dramas lacking a synopsis cannot be embedded, the retrieval pool inherently selects for well-documented dramas, inflating the pool base rate of High from 25.0% to **29.8%** and depressing Low to **15.9%**. Neighbor reach tiers must **never** be interpreted as a posterior success probability for an unproduced pitch.
+2. **Textual Similarity Is Not Success Similarity:** Two dramas with nearly identical loglines (e.g., historical palace coup) can experience radically divergent commercial outcomes driven by production budget, lead cast star power, marketing, and distribution.
+3. **Token Truncation:** Exactly **3.65%** (237 / 6,497) of synopses in the corpus exceed the model's 256-word-piece `max_seq_length` window and are truncated.
+4. **Editorial Synopsis vs. User Pitch Domain Shift:** MDL synopses are written post-broadcast by community editors or platform marketers, emphasizing narrative reveals. Queries from user pitch decks differ in style and length, making offline test evaluation optimistic compared to real-world deployment.
+5. **Coverage Gaps:** Scraping gaps in MDL directory pagination (most acute in 2019–2020) limit the completeness of comparable candidates in affected premiere cohorts.
+6. **Platform Terms of Use:** MDL terms of use must be verified before commercial deployment or republishing of synopsis-derived representations (the copilot displays only metadata and direct URL links).
+7. **Off-the-Shelf Embedding Model:** `all-MiniLM-L6-v2` is a general-domain English sentence transformer and has not been fine-tuned on Asian entertainment terminology or MDL community vocabularies.
+
+---
+
+*Test Suite (`tests/test_retriever.py`):*
+All 8 unit and integration tests pass cleanly (`pytest tests/test_retriever.py -v` in under 30s):
+1. `test_date_filter_maturity_rule`: Asserts candidate pool strictly enforces $start\_date \le query\_start - 365\text{ days}$.
+2. `test_missing_start_date_conventions`: Confirms candidates without start date default to Dec 31 of release year, and year-only queries default to Jan 1.
+3. `test_self_exclusion`: Confirms query drama is strictly excluded when querying by title/URL.
+4. `test_unlisted_network_returns_null`: Confirms missing/unlisted networks return `null` (`None`), never `"Unknown"`.
+5. `test_output_size`: Confirms exactly $k$ results returned (or pool size if pool $< k$).
+6. `test_determinism`: Confirms identical queries produce identical results across calls.
+7. `test_json_serializable_and_expected_keys`: Confirms JSON round-trip serialization and presence of all schema keys.
+8. `test_no_synopsis_text_in_returned_data`: Verifies absence of synopsis text in returned payloads.
+*(Offline guard: Tests skip cleanly if `models/` artifacts or local HuggingFace cache are missing; zero network requests occur during testing).*
+
+---
+
 
 ## ⚙️ Setup & Installation
 
@@ -637,6 +750,7 @@ All dataset processing and serialized model artifacts are generated through comm
 | **5** | `src/build_artifacts.py`<br>`python src/build_artifacts.py` | `data/processed/dramas_labeled.csv`<br>`data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv` | `models/headline_model.joblib`<br>`models/isotonic_calibrator.joblib`<br>`models/background_sample.joblib`<br>`models/talent_lookup.joblib`<br>`models/metadata.joblib` | Fits headline GBDT classifier on train (years $\le 2021$), fits isotonic calibrator on expanding-window OOF predictions, draws 100-drama background sample, indexes all 7,535 labeled dramas into talent lookup, and saves artifacts in ~8s. |
 | **6** | `notebooks/06_modeling.ipynb` | `data/processed/train_features_v2.csv`<br>`data/processed/test_features_v2.csv`<br>`data/processed/train_features_v1.csv`<br>`data/processed/test_features_v1.csv`<br>`data/processed/dramas_labeled.csv` | *(Evaluation metrics and tables)* | Evaluates baseline models, feature group ablations, temporal validation splits, probability calibration, and bootstrap test metrics. |
 | **7** | `notebooks/07_explainability.ipynb` | `models/*.joblib`<br>`data/processed/*` | `models/shap_sample_300.npz`<br>`models/stab_net_shap.npz`<br>`docs/shap_group_importance.png` | Global SHAP group attribution, missingness impact, presence vs. value controls, stability/faithfulness benchmarks, and case studies. |
+| **8** | `src/build_retriever.py`<br>`python src/build_retriever.py` | `data/processed/synopses_clean.csv`<br>`data/processed/dramas_labeled.csv` | `models/retriever_embeddings.npy`<br>`models/retriever_metadata.parquet`<br>`models/retriever_info.json` | Builds normalized float32 embeddings (N=6,497, 384-dim) and metadata table (omits synopsis text) in ~1s. |
 
 > [!IMPORTANT]
 > **Fresh-Clone Test Behavior & Artifact Guard:**
@@ -644,7 +758,7 @@ All dataset processing and serialized model artifacts are generated through comm
 > ```
 > Skipping: Missing artifacts or data required for tests: models/headline_model.joblib, models/isotonic_calibrator.joblib, models/background_sample.joblib, models/talent_lookup.joblib, models/metadata.joblib, data/processed/dramas_labeled.csv, data/processed/train_features_v2.csv, data/processed/test_features_v2.csv
 > ```
-> If `data/processed/` tables have been produced locally, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 9 unit and integration tests cleanly in under a minute.
+> If `data/processed/` tables have been produced locally, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 17 unit and integration tests cleanly in under 5 minutes.
 
 
 
@@ -658,7 +772,7 @@ All dataset processing and serialized model artifacts are generated through comm
 - [x] **Milestone 3:** Leakage-free feature engineering (`notebooks/05_feature_engineering.ipynb`, `src/features.py`).
 - [x] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
 - [x] **Milestone 5:** Model interpretability with SHAP.
-- [ ] **Milestone 6:** RAG retriever for comparable dramas.
+- [x] **Milestone 6:** Similar-drama retriever for comparable titles and narrative baselines (`src/retriever.py`, `src/build_retriever.py`, `notebooks/08_retriever.ipynb`).
 - [ ] **Milestone 7:** What-if simulator and LLM agent integration.
 - [ ] **Milestone 8:** FastAPI, Dockerization, and Hugging Face Spaces deployment.
 
