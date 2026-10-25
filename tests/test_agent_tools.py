@@ -14,6 +14,7 @@ Tests verify:
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any, Dict
@@ -150,15 +151,63 @@ def test_what_if_talent_change_recomputes_priors(pitches, explain_artifacts):
     """Asserts what_if recomputes talent track records when directors/cast change."""
     # pitch 8 has empty talent (debut)
     p = pitches[7]
+    # Dynamically select known talent from talent_lookup at test time (no hardcoded real names)
+    cast_lookup = explain_artifacts["talent_lookup"]["cast"]
+    known_actors = [name for name, history in cast_lookup.items() if len(history) >= 5][:2]
+    writer_lookup = explain_artifacts["talent_lookup"]["screenwriter"]
+    known_writer = [name for name, history in writer_lookup.items() if len(history) >= 5][0]
+
     star_talent_change = {
-        "lead_cast": ["Song Joong Ki", "Kim Tae Ri"],
-        "writers": ["Kim Eun Hee"],
+        "lead_cast": known_actors,
+        "writers": [known_writer],
     }
     res = what_if(p, star_talent_change, artifacts=explain_artifacts)
     assert res["after"]["raw_p_high"] != res["before"]["raw_p_high"]
     assert res["delta"]["raw_p_high_delta"] != 0.0
     assert "lead_cast" in res["changes_applied"]
     assert "writers" in res["changes_applied"]
+
+
+def test_what_if_blank_filling_decomposition_and_warning(pitches, explain_artifacts):
+    """
+    Asserts what_if detects when blank fields are filled, decomposes total delta into:
+    (a) typical value control effect, and (b) remaining specific choice effect,
+    and appends the blank-field artifact warning. Tested using pitch_05.
+    """
+    p5 = next(p for p in pitches if p["id"] == "pitch_05_blank_network_and_rating")
+    assert p5["network"] is None
+    assert p5["content_rating"] is None
+
+    changes = {"network": "JTBC", "content_rating": "15+"}
+    res = what_if(p5, changes, artifacts=explain_artifacts)
+
+    decomp = res["decomposition"]
+    assert decomp is not None
+    assert set(decomp["filled_fields"]) == {"network", "content_rating"}
+    assert decomp["typical_values_used"]["network"] == "Naver TV Cast"
+    assert decomp["typical_values_used"]["content_rating"] == "15+"
+
+    # Check additivity of decomposition
+    typ_cal = decomp["typical_value_control_delta"]["calibrated_p_high_delta"]
+    spec_cal = decomp["specific_choice_delta"]["calibrated_p_high_delta"]
+    tot_cal = res["delta"]["calibrated_p_high_delta"]
+    assert abs((typ_cal + spec_cal) - tot_cal) < 1e-4
+
+    # Check warning presence
+    assert any("part of this change reflects the model's lower P(high) when a field is blank" in w for w in res["warnings"])
+
+
+def test_unrecognized_network_emits_57_networks_warning(pitches, explain_artifacts):
+    """Asserts that specifying an unrecognized network emits a warning pointing to 57 training networks."""
+    p = copy.deepcopy(pitches[0])
+    p["network"] = "HBO Max Global"
+
+    out_exp = explain_pitch(p, artifacts=explain_artifacts)
+    assert any("not one of the 57 recognized training networks" in w for w in out_exp["warnings"])
+
+    # Also test what_if lever change
+    res_wi = what_if(pitches[0], {"network": "Acorn TV Streaming"}, artifacts=explain_artifacts)
+    assert any("not one of the 57 recognized training networks" in w for w in res_wi["warnings"])
 
 
 # -----------------------------------------------------------------------------
@@ -206,6 +255,63 @@ def test_prompt_injection_treated_as_plain_data(pitches, explain_artifacts):
         wi_out = what_if(p, {"network": "tvN"}, artifacts=explain_artifacts)
         assert wi_out["tool"] == "what_if"
         assert "associational, not causal" in wi_out["caveat"]
+
+
+def test_injection_control_identical_predictive_outputs(pitches, explain_artifacts, retriever_artifacts):
+    """
+    Asserts that replacing the prompt injection in pitch 11 with neutral text yields
+    100% IDENTICAL explain_pitch and what_if outputs, while only find_comparables differs.
+    """
+    p11 = next(p for p in pitches if p["id"] == "pitch_11_injection_ignore_instructions")
+    neutral_pitch = copy.deepcopy(p11)
+    neutral_pitch["synopsis_text"] = (
+        "A seasoned detective and a rookie investigator pursue an elusive serial criminal "
+        "across Seoul's metropolitan subway transit network."
+    )
+
+    # 1. explain_pitch must be 100% identical
+    exp_inj = explain_pitch(p11, artifacts=explain_artifacts, seed=42)
+    exp_neu = explain_pitch(neutral_pitch, artifacts=explain_artifacts, seed=42)
+    assert exp_inj == exp_neu
+
+    # 2. what_if must be 100% identical
+    wi_inj = what_if(p11, {"network": "SBS"}, artifacts=explain_artifacts)
+    wi_neu = what_if(neutral_pitch, {"network": "SBS"}, artifacts=explain_artifacts)
+    assert wi_inj == wi_neu
+
+    # 3. find_comparables uses synopsis embeddings, so comparables may differ
+    comp_inj = find_comparables(p11, k=3, artifacts=retriever_artifacts)
+    comp_neu = find_comparables(neutral_pitch, k=3, artifacts=retriever_artifacts)
+    inj_names = [c["name"] for c in comp_inj["comparables"]]
+    neu_names = [c["name"] for c in comp_neu["comparables"]]
+    assert inj_names != neu_names
+
+
+def test_quotable_blocks_present_and_formatted(pitches, explain_artifacts, retriever_artifacts):
+    """Asserts each tool returns a quotable block with rounded probability and observed rate."""
+    p = pitches[0]
+
+    # explain_pitch
+    exp = explain_pitch(p, artifacts=explain_artifacts)
+    assert "quotable" in exp
+    q_exp = exp["quotable"]
+    assert q_exp["likelihood_band"] in ["Very likely", "Likely", "Possible", "Unlikely"]
+    assert "observed_band_rate" in q_exp
+    assert isinstance(q_exp["probability_rounded_5pct"], float)
+    assert q_exp["probability_rounded_5pct"] in [round(i * 0.05, 2) for i in range(21)]
+    assert q_exp["predicted_tier"] in ["High", "Medium", "Low"]
+
+    # what_if
+    wi = what_if(p, {"network": "SBS"}, artifacts=explain_artifacts)
+    assert "quotable" in wi
+    assert "before" in wi["quotable"]
+    assert "after" in wi["quotable"]
+    assert wi["quotable"]["after"]["probability_rounded_5pct"] in [round(i * 0.05, 2) for i in range(21)]
+
+    # find_comparables
+    comp = find_comparables(p, k=3, artifacts=retriever_artifacts)
+    assert "quotable" in comp
+    assert "caveat" in comp["quotable"]
 
 
 # -----------------------------------------------------------------------------

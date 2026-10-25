@@ -61,6 +61,34 @@ DISALLOWED_LEVERS = {
 
 VALID_COUNTRIES = {"South Korea", "China", "Japan", "Thailand"}
 
+# Most common non-missing training values by country (train cohorts <= 2021)
+COUNTRY_TYPICAL_VALUES: Dict[str, Dict[str, str]] = {
+    "South Korea": {
+        "network": "Naver TV Cast",
+        "content_rating": "15+",
+    },
+    "China": {
+        "network": "iQiyi",
+        "content_rating": "13+",
+    },
+    "Japan": {
+        "network": "NHK",
+        "content_rating": "13+",
+    },
+    "Thailand": {
+        "network": "Channel 7",
+        "content_rating": "G",
+    },
+}
+
+
+def is_blank_value(val: Any) -> bool:
+    """Helper to detect if a network or content rating value is blank/missing."""
+    if val is None:
+        return True
+    s = str(val).strip()
+    return s in ["", "Unknown", "Not Yet Rated", "nan", "None"]
+
 
 # -----------------------------------------------------------------------------
 # Input & Output TypedDict Schemas
@@ -79,6 +107,20 @@ class PitchInput(TypedDict, total=False):
     lead_cast: List[str]
     planned_start: Union[str, int]
     synopsis_text: Optional[str]
+
+
+class QuotableBlock(TypedDict):
+    """Guaranteed quotable block for downstream memo text and agent quoting."""
+    likelihood_band: str
+    observed_band_rate: str
+    probability_rounded_5pct: float
+    predicted_tier: str
+
+
+class ComparablesQuotable(TypedDict):
+    """Quotable block for comparables tool."""
+    summary: str
+    caveat: str
 
 
 class ComparableNeighbor(TypedDict):
@@ -103,6 +145,7 @@ class FindComparablesOutput(TypedDict):
     maturity_cutoff: str
     country_filter: Optional[str]
     comparables: List[ComparableNeighbor]
+    quotable: ComparablesQuotable
     caveat: str
 
 
@@ -120,6 +163,7 @@ class ExplainPitchOutput(TypedDict):
     tool: Literal["explain_pitch"]
     pitch_summary: Dict[str, Any]
     prediction: PredictionSummary
+    quotable: QuotableBlock
     attributions: Dict[str, float]
     top_positive_drivers: List[Dict[str, Any]]
     top_negative_drivers: List[Dict[str, Any]]
@@ -141,13 +185,29 @@ class WhatIfDeltas(TypedDict):
     calibrated_p_high_delta: float
 
 
+class BlankFillDecomposition(TypedDict):
+    """Decomposition of what_if delta when filling blank fields."""
+    filled_fields: List[str]
+    typical_values_used: Dict[str, str]
+    typical_value_control_delta: WhatIfDeltas
+    specific_choice_delta: WhatIfDeltas
+
+
+class WhatIfQuotable(TypedDict):
+    """Quotable block for what_if tool."""
+    before: QuotableBlock
+    after: QuotableBlock
+
+
 class WhatIfOutput(TypedDict):
     """Output schema for what_if tool."""
     tool: Literal["what_if"]
     before: WhatIfState
     after: WhatIfState
     delta: WhatIfDeltas
+    decomposition: Optional[BlankFillDecomposition]
     changes_applied: Dict[str, Any]
+    quotable: WhatIfQuotable
     caveat: str
     warnings: List[str]
 
@@ -347,14 +407,32 @@ def explain_pitch(
         "observed_band_rate": raw_explain["band_observed_rate"],
     }
 
+    # Check if network is recognized among the 57 valid networks
+    meta = artifacts.get("metadata", {})
+    valid_networks = meta.get("valid_networks", [])
+    raw_warnings = list(raw_explain.get("warnings", []))
+    net = validated.get("network")
+    if net and not is_blank_value(net) and net not in valid_networks:
+        raw_warnings.append(
+            f"Broadcaster network '{net}' is not one of the 57 recognized training networks; falls back to 'Other'."
+        )
+
+    quotable: QuotableBlock = {
+        "likelihood_band": raw_explain["likelihood_band"],
+        "observed_band_rate": raw_explain["band_observed_rate"],
+        "probability_rounded_5pct": round(round(raw_explain["calibrated_p_high"] * 20.0) / 20.0, 2),
+        "predicted_tier": raw_explain["predicted_tier"],
+    }
+
     output: ExplainPitchOutput = {
         "tool": "explain_pitch",
         "pitch_summary": pitch_summary,
         "prediction": prediction,
+        "quotable": quotable,
         "attributions": raw_explain["group_attributions"],
         "top_positive_drivers": raw_explain["top_positive_groups"],
         "top_negative_drivers": raw_explain["top_negative_groups"],
-        "warnings": raw_explain["warnings"],
+        "warnings": raw_warnings,
         "caveats": raw_explain["caveats"],
     }
 
@@ -411,6 +489,11 @@ def find_comparables(
             }
         )
 
+    comparables_quotable: ComparablesQuotable = {
+        "summary": f"{len(comparables)} historical comparables retrieved under the 12-month rule.",
+        "caveat": "Tiers of comparables must not be quoted as probabilities for the pitch.",
+    }
+
     output: FindComparablesOutput = {
         "tool": "find_comparables",
         "k_requested": int(k),
@@ -420,6 +503,7 @@ def find_comparables(
         "maturity_cutoff": sim_result["maturity_cutoff"],
         "country_filter": sim_result["country_filter"],
         "comparables": comparables,
+        "quotable": comparables_quotable,
         "caveat": "comparables show similar premises; their tiers are not a probability for this pitch",
     }
 
@@ -479,6 +563,20 @@ def what_if(
 
     # 2. If no changes, return delta 0
     if not validated_changes:
+        empty_quotable: WhatIfQuotable = {
+            "before": {
+                "likelihood_band": before_state["likelihood_band"],
+                "observed_band_rate": TEST_BAND_OBSERVED_RATES[before_state["likelihood_band"]],
+                "probability_rounded_5pct": round(round(before_state["calibrated_p_high"] * 20.0) / 20.0, 2),
+                "predicted_tier": before_state["predicted_tier"],
+            },
+            "after": {
+                "likelihood_band": before_state["likelihood_band"],
+                "observed_band_rate": TEST_BAND_OBSERVED_RATES[before_state["likelihood_band"]],
+                "probability_rounded_5pct": round(round(before_state["calibrated_p_high"] * 20.0) / 20.0, 2),
+                "predicted_tier": before_state["predicted_tier"],
+            },
+        }
         output: WhatIfOutput = {
             "tool": "what_if",
             "before": before_state,
@@ -487,7 +585,9 @@ def what_if(
                 "raw_p_high_delta": 0.0,
                 "calibrated_p_high_delta": 0.0,
             },
+            "decomposition": None,
             "changes_applied": {},
+            "quotable": empty_quotable,
             "caveat": "Results are associational, not causal; changing attachments does not guarantee audience reach shifts.",
             "warnings": before_warnings,
         }
@@ -505,7 +605,73 @@ def what_if(
     # Combine unique warnings
     combined_warnings = list(dict.fromkeys(before_warnings + after_warnings))
 
-    output = {
+    # Network recognition check on changes
+    meta = artifacts.get("metadata", {})
+    valid_networks = meta.get("valid_networks", [])
+    if "network" in validated_changes:
+        new_net = validated_changes["network"]
+        if new_net and not is_blank_value(new_net) and new_net not in valid_networks:
+            combined_warnings.append(
+                f"Broadcaster network '{new_net}' is not one of the 57 recognized training networks; falls back to 'Other'."
+            )
+
+    # 5. Detect blank-filling changes and compute decomposition
+    blank_filled_levers = []
+    for lever in ["network", "content_rating"]:
+        if (
+            lever in validated_changes
+            and is_blank_value(validated_pitch.get(lever))
+            and not is_blank_value(validated_changes[lever])
+        ):
+            blank_filled_levers.append(lever)
+
+    decomposition: Optional[BlankFillDecomposition] = None
+    if blank_filled_levers:
+        country = validated_pitch["country"]
+        typical_dict = COUNTRY_TYPICAL_VALUES.get(country, {"network": "Other", "content_rating": "15+"})
+
+        control_pitch = copy.deepcopy(validated_pitch)
+        typical_used = {}
+        for lever in blank_filled_levers:
+            typ_val = typical_dict.get(lever, "Other")
+            control_pitch[lever] = typ_val
+            typical_used[lever] = typ_val
+
+        control_state, _ = _score_pitch(control_pitch, artifacts)
+
+        typ_delta: WhatIfDeltas = {
+            "raw_p_high_delta": float(round(control_state["raw_p_high"] - before_state["raw_p_high"], 4)),
+            "calibrated_p_high_delta": float(round(control_state["calibrated_p_high"] - before_state["calibrated_p_high"], 4)),
+        }
+        spec_delta: WhatIfDeltas = {
+            "raw_p_high_delta": float(round(after_state["raw_p_high"] - control_state["raw_p_high"], 4)),
+            "calibrated_p_high_delta": float(round(after_state["calibrated_p_high"] - control_state["calibrated_p_high"], 4)),
+        }
+
+        decomposition = {
+            "filled_fields": blank_filled_levers,
+            "typical_values_used": typical_used,
+            "typical_value_control_delta": typ_delta,
+            "specific_choice_delta": spec_delta,
+        }
+        combined_warnings.append("part of this change reflects the model's lower P(high) when a field is blank")
+
+    quotable: WhatIfQuotable = {
+        "before": {
+            "likelihood_band": before_state["likelihood_band"],
+            "observed_band_rate": TEST_BAND_OBSERVED_RATES[before_state["likelihood_band"]],
+            "probability_rounded_5pct": round(round(before_state["calibrated_p_high"] * 20.0) / 20.0, 2),
+            "predicted_tier": before_state["predicted_tier"],
+        },
+        "after": {
+            "likelihood_band": after_state["likelihood_band"],
+            "observed_band_rate": TEST_BAND_OBSERVED_RATES[after_state["likelihood_band"]],
+            "probability_rounded_5pct": round(round(after_state["calibrated_p_high"] * 20.0) / 20.0, 2),
+            "predicted_tier": after_state["predicted_tier"],
+        },
+    }
+
+    output: WhatIfOutput = {
         "tool": "what_if",
         "before": before_state,
         "after": after_state,
@@ -513,9 +679,11 @@ def what_if(
             "raw_p_high_delta": float(round(after_state["raw_p_high"] - before_state["raw_p_high"], 4)),
             "calibrated_p_high_delta": float(round(after_state["calibrated_p_high"] - before_state["calibrated_p_high"], 4)),
         },
+        "decomposition": decomposition,
         "changes_applied": validated_changes,
+        "quotable": quotable,
         "caveat": "Results are associational, not causal; changing attachments does not guarantee audience reach shifts.",
-        "warnings": combined_warnings,
+        "warnings": list(dict.fromkeys(combined_warnings)),
     }
 
     json.dumps(output)
