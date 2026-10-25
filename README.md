@@ -699,19 +699,25 @@ To enable an autonomous decision agent to interact reliably with the prediction,
 
 1. **`explain_pitch(pitch)`:**
    - **Inputs:** `PitchInput` containing `country`, `network` (nullable), `genres`, `content_rating` (nullable), `weekdays`, `episodes`, `directors`, `writers`, `lead_cast`, `planned_start` (date or 4-digit year), and optional `synopsis_text` (used strictly for comparables).
-   - **Outputs:** `ExplainPitchOutput` containing sanitized `pitch_summary`, `prediction` (raw $P(\text{High})$, isotonic-calibrated $P(\text{High})$, predicted tier, likelihood band, and observed test band rate), `quotable` block, global and local SHAP `attributions`, `top_positive_drivers`, `top_negative_drivers`, data quality `warnings`, and modeling `caveats`.
-   - **Behavior:** Re-maps input attributes to the exact 47 tabular modeling features, checks broadcaster against the 57 recognized training networks (emitting a warning if falling back to `"Other"`), queries rolling talent history under the 12-month rule, evaluates calibrated GBDT probabilities, and computes Monte Carlo SHAP group attributions with human-readable rationale text.
+   - **Outputs:** `ExplainPitchOutput` containing sanitized `pitch_summary`, `prediction` (raw $P(\text{High})$, isotonic-calibrated $P(\text{High})$, `predicted_tier` labeled with `tier_note: "most likely tier among three (model argmax)"`, likelihood band, and observed test band rate), `quotable` block (`likelihood_band`, `observed_band_rate`, and `probability_display`), global and local SHAP `attributions`, `top_positive_drivers`, `top_negative_drivers`, data quality `warnings`, and modeling `caveats`.
+   - **Behavior:** Re-maps input attributes to the exact 47 tabular modeling features, checks broadcaster against the 57 recognized training networks case- and whitespace-insensitively (e.g., `"JTBC"` automatically maps to `"jTBC"`, emitting difflib suggestions when unrecognized), queries rolling talent history under the 12-month rule, evaluates calibrated GBDT probabilities, and computes Monte Carlo SHAP group attributions with human-readable rationale text.
 
 2. **`find_comparables(pitch, k=5)`:**
    - **Inputs:** `pitch` containing `synopsis_text`, `planned_start`, and `country`; optional retrieval size `k` (default: 5).
-   - **Outputs:** `FindComparablesOutput` containing candidate pool size, effective maturity cutoff date, `quotable` block, and a list of comparable neighbor records with `name`, `release_year`, `country`, `network` (`None` if unlisted), `target_tier`, `similarity_score`, `url`, and the mandatory fixed caveat: `"comparables show similar premises; their tiers are not a probability for this pitch"`.
+   - **Outputs:** `FindComparablesOutput` containing candidate pool size, effective maturity cutoff date, `quotable` block (clean records of `name`, `release_year`, `country`, `network`, `tier`, `url` plus premise caveat and scoring note), and a list of comparable neighbor records with `similarity_score`, `url`, and the mandatory fixed caveat: `"comparables show similar premises; their tiers are not a probability for this pitch"`.
    - **Behavior:** Vectorizes pitch synopsis via `sentence-transformers/all-MiniLM-L6-v2`, strictly enforces the 12-month maturity cutoff ($start\_date \le planned\_start - 365\text{ days}$) and country filter, computes exact cosine similarity against the 6,497 corpus embeddings, and returns metadata only. **Synopsis text is strictly omitted from the output.**
 
 3. **`what_if(pitch, changes)`:**
    - **Inputs:** Base `pitch` and a dictionary of modified `changes`.
    - **Allowed Levers (Pitch Decisions):** Strictly restricted to `network`, `genres`, `content_rating`, `directors`, `writers`, and `lead_cast`.
    - **Disallowed Levers:** Strictly rejects `episodes`, `weekdays`, `country`, and `planned_start` with an explicit `ValueError`. Rejects submissions with more than 3 changes.
-   - **Blank-Field Decomposition:** When changes fill previously blank fields (`network`, `content_rating`), returns in addition to the total delta an exact decomposition: (a) the effect of filling the blank with the most common train value for that country (`"typical_value_control_delta"`), and (b) the remaining effect of the specific choice relative to that control (`"specific_choice_delta"`). Appends warning: `"part of this change reflects the model's lower P(high) when a field is blank"`.
+   - **Blank-Field Decomposition & Typical-Value Control:** When changes fill previously blank fields (`network`, `content_rating`), returns in addition to the total delta an exact decomposition: (a) the effect of filling the blank with the most common train value for that country (`"typical_value_control_delta"`), and (b) the remaining effect of the specific choice relative to that control (`"specific_choice_delta"`). Appends warning: `"part of this change reflects the model's lower P(high) when a field is blank"`.
+     - *Training Empirical Modes by Country:*
+       - **South Korea:** Broadcaster: `"Naver TV Cast"`, Content Rating: `"15+"`
+       - **China:** Broadcaster: `"iQiyi"`, Content Rating: `"13+"`
+       - **Japan:** Broadcaster: `"NHK"`, Content Rating: `"13+"`
+       - **Thailand:** Broadcaster: `"Channel 7"`, Content Rating: `"G"`
+     - *Advisory Note:* This typical-value control uses the empirical mode from training cohorts ($\le 2021$) and is strictly a statistical baseline control to isolate page-completeness bias, **NOT an industry greenlight recommendation**.
    - **Outputs:** `WhatIfOutput` containing `before` and `after` states (raw $P(\text{High})$, calibrated $P(\text{High})$, predicted tier, likelihood band), calculated deltas (`raw_p_high_delta`, `calibrated_p_high_delta`), `decomposition` (if blanks were filled), `changes_applied`, `quotable` block (for before and after), warnings (including 57-networks check), and the fixed associational caveat: `"Results are associational, not causal; changing attachments does not guarantee audience reach shifts."`.
    - **Behavior:** Recomputes talent prior reach for altered creative personnel using the 12-month rule relative to `planned_start - 365 days`.
 
@@ -719,19 +725,22 @@ To enable an autonomous decision agent to interact reliably with the prediction,
 
 #### Validation, Prompt-Injection Safety & Schema Design
 - **Schema Implementation (`TypedDict` + Explicit Runtime Validators):**
-  Implemented using Python standard library `typing.TypedDict` paired with strict functional validators (`validate_pitch`, `validate_what_if_changes`, `sanitize_string`, `sanitize_string_list`). This guarantees zero external dependencies (avoiding Pydantic version mismatches and SDK overhead), enables native JSON serialization without schema conversion hazards, and enforces deterministic typing.
+  Implemented using Python standard library `typing.TypedDict` paired with strict functional validators (`validate_pitch`, `validate_what_if_changes`, `sanitize_string`, `sanitize_string_list`, `match_network`). This guarantees zero external dependencies (avoiding Pydantic version mismatches and SDK overhead), enables native JSON serialization without schema conversion hazards, and enforces deterministic typing.
 - **Quotable Block & Downstream Quoting Mandate:**
   Each tool output provides a standardized `quotable` block:
   ```json
   "quotable": {
     "likelihood_band": "Likely",
     "observed_band_rate": "57.8% [95% CI: 52.6%, 62.9%] (N=351; observed on test dramas released 2022-2025, relative to dramas of the same country and year)",
-    "probability_rounded_5pct": 0.60,
-    "predicted_tier": "High"
+    "probability_display": "60%"
   }
   ```
   > [!IMPORTANT]
-  > **Downstream Quoting Rule:** Downstream text (including LLM greenlight memos and UI summaries) **may only quote values from this `quotable` block**. Exact model probabilities (e.g. `0.5833`) must **not** be quoted directly, preventing spurious precision and keeping executive decision-makers anchored on calibrated uncertainty bands.
+  > **Downstream Quoting Rule:**
+  > 1. Downstream text (including LLM greenlight memos and UI summaries) **may only quote values from this `quotable` block**.
+  > 2. Exact unrounded continuous probabilities (e.g. `0.5833`) must **not** be quoted directly; the block formats probabilities as `probability_display` (`"under 5%"` / `"over 95%"` at the 0.02/0.98 clip bounds, and rounded 5% increments elsewhere; never `0.00` or `1.00`).
+  > 3. `predicted_tier` is excluded from the `quotable` block because the 3-class argmax can select High while calibrated probability is only 25%; it remains in the prediction block strictly labeled as `"most likely tier among three (model argmax)"`.
+  > 4. For `find_comparables`, the quotable block provides only the returned drama records (`name`, `release_year`, `country`, `network`, `tier`, `url`) and premise caveat. Similarity scores measure textual logline proximity and must **never** be presented as success probabilities.
 - **Input Sanitization & Length Bounds:**
   - Standard strings: capped at $\le 200$ characters.
   - Synopsis text: capped at $\le 2000$ characters.
@@ -742,8 +751,10 @@ To enable an autonomous decision agent to interact reliably with the prediction,
   *Injection Control Verification:* Running `pitch_11` with the adversarial injection versus with a neutral synopsis confirms that `explain_pitch` and `what_if` produce **100% identical outputs across every field**, while only `find_comparables` differs (as expected from semantic vectorization).
 - **Data Privacy & Synopsis Protection:**
   Synopsis text is never returned by any agent tool, safeguarding downstream prompt context windows and respecting licensing boundaries.
-- **Fictional Talent Placeholders:**
+- **Fictional Talent Placeholders & History Scoring Disclosures:**
   All test fixtures use completely fictional names for directors, screenwriters, and cast. Unit tests that verify talent history recomputation select active talent dynamically from `models/talent_lookup.joblib` at runtime rather than hardcoding real individuals.
+  > [!NOTE]
+  > **Talent History Scoring Impact:** Pitches whose talent has no qualifying history in the lookup score lower than pitches with established talent. In Fixture 01, substituting real A-list creators with fictional debut names left all non-talent features identical while reducing raw $P(\text{High})$ from $0.929$ to $0.718$ and calibrated $P(\text{High})$ from $0.915$ to $0.583$ (band shifting from Very likely to Likely) solely because prior reach fell to `NaN`. The public demo interface must explicitly disclose this behavior so users do not mistake debut penalty for concept weakness.
 
 ---
 
@@ -754,7 +765,7 @@ To enable an autonomous decision agent to interact reliably with the prediction,
   - 2 debut talent pitches (introducing unindexed directors and screenwriters).
   - 2 adversarial injection pitches (testing prompt overrides and JSON break attempts).
 - **Test Suite Results:**
-  All 15 unit and integration tests pass cleanly (`pytest tests/test_agent_tools.py -v` in $\approx 55$s):
+  All 15 unit and integration tests pass cleanly (`pytest tests/test_agent_tools.py -v` in $\approx 37$s):
   1. `test_validate_pitch_valid`: Validates parsing and normalization across complete fixtures.
   2. `test_validate_pitch_invalid_country`: Rejects unsupported countries.
   3. `test_validate_pitch_missing_start`: Rejects pitches lacking premiere date/year.
@@ -764,11 +775,11 @@ To enable an autonomous decision agent to interact reliably with the prediction,
   7. `test_what_if_empty_changes_gives_delta_zero`: Verifies that empty changes return an identical `after` state and zero delta.
   8. `test_what_if_talent_change_recomputes_priors`: Dynamically selects talent from lookup at runtime and asserts rolling percentiles recompute.
   9. `test_what_if_blank_filling_decomposition_and_warning`: Tested on fixture `pitch_05`; asserts exact additive decomposition of typical value control vs specific choice and presence of blank-field artifact warning.
-  10. `test_unrecognized_network_emits_57_networks_warning`: Asserts unrecognized broadcaster network emits warning pointing to 57 training networks.
+  10. `test_unrecognized_network_emits_57_networks_warning`: Asserts case/whitespace-insensitive match for known networks and emits warning with difflib suggestions for unrecognized broadcasters.
   11. `test_no_synopsis_text_in_tool_outputs`: Enforces that no synopsis text or keys appear in any output dictionary.
   12. `test_prompt_injection_treated_as_plain_data`: Verifies adversarial prompts are treated as literal strings without crashing or altering execution.
   13. `test_injection_control_identical_predictive_outputs`: Asserts that replacing prompt injection with neutral text yields 100% identical `explain_pitch` and `what_if` outputs while only `find_comparables` differs.
-  14. `test_quotable_blocks_present_and_formatted`: Verifies presence and valid formatting of `quotable` blocks across all three tools.
+  14. `test_quotable_blocks_present_and_formatted`: Verifies presence and valid formatting of `quotable` blocks across all three tools, excluding predicted_tier and formatting probability_display.
   15. `test_outputs_deterministic_and_json_serializable`: Asserts identical repeated executions and valid `json.dumps()` round-tripping.
 
 *(Total test suite across all modules: 33 tests passing).*

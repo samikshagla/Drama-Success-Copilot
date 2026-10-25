@@ -198,15 +198,27 @@ def test_what_if_blank_filling_decomposition_and_warning(pitches, explain_artifa
 
 
 def test_unrecognized_network_emits_57_networks_warning(pitches, explain_artifacts):
-    """Asserts that specifying an unrecognized network emits a warning pointing to 57 training networks."""
-    p = copy.deepcopy(pitches[0])
-    p["network"] = "HBO Max Global"
+    """
+    Asserts that:
+    1. Case- and whitespace-insensitive matching succeeds for known networks without warnings (e.g. 'JTBC' -> 'jTBC').
+    2. Truly unrecognized networks emit a warning citing 57 training networks and close suggestions via difflib.
+    """
+    # 1. Case- and whitespace-insensitive matching succeeds
+    p_jtbc = copy.deepcopy(pitches[0])
+    p_jtbc["network"] = "  JTBC  "
+    out_jtbc = explain_pitch(p_jtbc, artifacts=explain_artifacts)
+    assert out_jtbc["pitch_summary"]["network"] == "jTBC"
+    assert not any("not one of the 57 recognized training networks" in w for w in out_jtbc["warnings"])
 
-    out_exp = explain_pitch(p, artifacts=explain_artifacts)
-    assert any("not one of the 57 recognized training networks" in w for w in out_exp["warnings"])
+    # 2. Truly unrecognized network emits warning with suggestions
+    p_bad = copy.deepcopy(pitches[0])
+    p_bad["network"] = "Acorn TV Streaming"
+    out_bad = explain_pitch(p_bad, artifacts=explain_artifacts)
+    assert any("not one of the 57 recognized training networks" in w for w in out_bad["warnings"])
+    assert any("Did you mean:" in w for w in out_bad["warnings"])
 
     # Also test what_if lever change
-    res_wi = what_if(pitches[0], {"network": "Acorn TV Streaming"}, artifacts=explain_artifacts)
+    res_wi = what_if(pitches[0], {"network": "HBO Max"}, artifacts=explain_artifacts)
     assert any("not one of the 57 recognized training networks" in w for w in res_wi["warnings"])
 
 
@@ -288,7 +300,13 @@ def test_injection_control_identical_predictive_outputs(pitches, explain_artifac
 
 
 def test_quotable_blocks_present_and_formatted(pitches, explain_artifacts, retriever_artifacts):
-    """Asserts each tool returns a quotable block with rounded probability and observed rate."""
+    """
+    Asserts each tool returns a quotable block:
+    - Never prints 0.00 or 1.00; uses probability_display ('under 5%' / 'over 95%' at bounds).
+    - Excludes predicted_tier from quotable; keeps predicted_tier in prediction with argmax label.
+    - For comparables, defines quotable fields as records (name, year, country, network, tier, url)
+      and scoring_note prohibiting presenting similarity as probabilities.
+    """
     p = pitches[0]
 
     # explain_pitch
@@ -297,21 +315,36 @@ def test_quotable_blocks_present_and_formatted(pitches, explain_artifacts, retri
     q_exp = exp["quotable"]
     assert q_exp["likelihood_band"] in ["Very likely", "Likely", "Possible", "Unlikely"]
     assert "observed_band_rate" in q_exp
-    assert isinstance(q_exp["probability_rounded_5pct"], float)
-    assert q_exp["probability_rounded_5pct"] in [round(i * 0.05, 2) for i in range(21)]
-    assert q_exp["predicted_tier"] in ["High", "Medium", "Low"]
+    assert "probability_display" in q_exp
+    assert q_exp["probability_display"] not in ["0%", "0.00", "0.0", "100%", "1.00", "1.0"]
+    # predicted_tier must be removed from quotable
+    assert "predicted_tier" not in q_exp
+    # predicted_tier remains in prediction with argmax note
+    assert "predicted_tier" in exp["prediction"]
+    assert "tier_note" in exp["prediction"]
+    assert "most likely tier among three (model argmax)" in exp["prediction"]["tier_note"]
 
     # what_if
     wi = what_if(p, {"network": "SBS"}, artifacts=explain_artifacts)
     assert "quotable" in wi
     assert "before" in wi["quotable"]
     assert "after" in wi["quotable"]
-    assert wi["quotable"]["after"]["probability_rounded_5pct"] in [round(i * 0.05, 2) for i in range(21)]
+    assert "probability_display" in wi["quotable"]["after"]
+    assert wi["quotable"]["after"]["probability_display"] not in ["0%", "0.00", "0.0", "100%", "1.00", "1.0"]
+    assert "predicted_tier" not in wi["quotable"]["after"]
 
     # find_comparables
     comp = find_comparables(p, k=3, artifacts=retriever_artifacts)
     assert "quotable" in comp
-    assert "caveat" in comp["quotable"]
+    q_comp = comp["quotable"]
+    assert "comparables" in q_comp
+    assert len(q_comp["comparables"]) == 3
+    rec0 = q_comp["comparables"][0]
+    assert set(rec0.keys()) == {"name", "release_year", "country", "network", "tier", "url"}
+    assert "similarity_score" not in rec0
+    assert "caveat" in q_comp
+    assert "scoring_note" in q_comp
+    assert "must not be presented as probabilities" in q_comp["scoring_note"]
 
 
 # -----------------------------------------------------------------------------

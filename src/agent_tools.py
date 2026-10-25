@@ -15,6 +15,7 @@ Design Choice: Standard library TypedDict + explicit runtime validators
 from __future__ import annotations
 
 import copy
+import difflib
 import json
 import re
 from pathlib import Path
@@ -90,6 +91,50 @@ def is_blank_value(val: Any) -> bool:
     return s in ["", "Unknown", "Not Yet Rated", "nan", "None"]
 
 
+def format_probability_display(cal_p: float) -> str:
+    """
+    Format calibrated probability for executive display:
+    - Extremes (at or near 0.02 / 0.98 clip bounds): "under 5%" or "over 95%"
+    - Intermediate values: rounded to nearest 5% increment (e.g., "10%", "25%", "60%")
+    - Never prints "0%" / "0.00" or "100%" / "1.00"
+    """
+    if cal_p <= 0.05:
+        return "under 5%"
+    if cal_p >= 0.95:
+        return "over 95%"
+    rounded_pct = int(round(round(cal_p * 20.0) / 20.0 * 100))
+    if rounded_pct <= 0:
+        return "under 5%"
+    if rounded_pct >= 100:
+        return "over 95%"
+    return f"{rounded_pct}%"
+
+
+def match_network(typed_net: Optional[str], valid_networks: List[str]) -> tuple[Optional[str], Optional[str]]:
+    """
+    Matches a typed network name to the 57 valid training networks case- and whitespace-insensitively.
+    If no match, finds up to 3 close matches using difflib.
+    Returns: (matched_network, warning_if_unrecognized)
+    """
+    if is_blank_value(typed_net):
+        return None, None
+    s = " ".join(str(typed_net).strip().split())
+    norm_map = {" ".join(n.strip().split()).lower(): n for n in valid_networks}
+    if s.lower() in norm_map:
+        return norm_map[s.lower()], None
+
+    lower_candidates = {n.lower(): n for n in valid_networks}
+    close_lowers = difflib.get_close_matches(s.lower(), list(lower_candidates.keys()), n=3, cutoff=0.4)
+    if close_lowers:
+        suggestions = [lower_candidates[cl] for cl in close_lowers]
+    else:
+        suggestions = difflib.get_close_matches(s, valid_networks, n=3, cutoff=0.3)
+
+    sugg_str = f" Did you mean: {', '.join(repr(x) for x in suggestions)}?" if suggestions else ""
+    warning = f"Broadcaster network '{typed_net}' is not one of the 57 recognized training networks; falls back to 'Other'.{sugg_str}"
+    return s, warning
+
+
 # -----------------------------------------------------------------------------
 # Input & Output TypedDict Schemas
 # -----------------------------------------------------------------------------
@@ -113,14 +158,24 @@ class QuotableBlock(TypedDict):
     """Guaranteed quotable block for downstream memo text and agent quoting."""
     likelihood_band: str
     observed_band_rate: str
-    probability_rounded_5pct: float
-    predicted_tier: str
+    probability_display: str
+
+
+class ComparableQuotableRecord(TypedDict):
+    """Clean quotable record for a retrieved comparable drama."""
+    name: str
+    release_year: int
+    country: str
+    network: Optional[str]
+    tier: str
+    url: str
 
 
 class ComparablesQuotable(TypedDict):
     """Quotable block for comparables tool."""
-    summary: str
+    comparables: List[ComparableQuotableRecord]
     caveat: str
+    scoring_note: str
 
 
 class ComparableNeighbor(TypedDict):
@@ -154,6 +209,7 @@ class PredictionSummary(TypedDict):
     raw_p_high: float
     calibrated_p_high: float
     predicted_tier: str
+    tier_note: str
     likelihood_band: str
     observed_band_rate: str
 
@@ -368,10 +424,14 @@ def explain_pitch(
     if artifacts is None:
         artifacts = load_explain_artifacts()
 
-    # Format dictionary for explain_drama
+    # Format dictionary for explain_drama with case-insensitive network matching
+    meta = artifacts.get("metadata", {})
+    valid_networks = meta.get("valid_networks", [])
+    matched_network, net_warning = match_network(validated.get("network"), valid_networks)
+
     inputs = {
         "country": validated["country"],
-        "network": validated["network"],
+        "network": matched_network,
         "genres": validated["genres"],
         "content_rating": validated["content_rating"],
         "weekdays": validated["weekdays"],
@@ -388,7 +448,7 @@ def explain_pitch(
     # Summary of pitch fields (strictly omitting any synopsis text)
     pitch_summary = {
         "country": validated["country"],
-        "network": validated["network"],
+        "network": matched_network,
         "genres": validated["genres"],
         "content_rating": validated["content_rating"],
         "weekdays": validated["weekdays"],
@@ -403,25 +463,19 @@ def explain_pitch(
         "raw_p_high": raw_explain["raw_p_high"],
         "calibrated_p_high": raw_explain["calibrated_p_high"],
         "predicted_tier": raw_explain["predicted_tier"],
+        "tier_note": "most likely tier among three (model argmax)",
         "likelihood_band": raw_explain["likelihood_band"],
         "observed_band_rate": raw_explain["band_observed_rate"],
     }
 
-    # Check if network is recognized among the 57 valid networks
-    meta = artifacts.get("metadata", {})
-    valid_networks = meta.get("valid_networks", [])
     raw_warnings = list(raw_explain.get("warnings", []))
-    net = validated.get("network")
-    if net and not is_blank_value(net) and net not in valid_networks:
-        raw_warnings.append(
-            f"Broadcaster network '{net}' is not one of the 57 recognized training networks; falls back to 'Other'."
-        )
+    if net_warning:
+        raw_warnings.append(net_warning)
 
     quotable: QuotableBlock = {
         "likelihood_band": raw_explain["likelihood_band"],
         "observed_band_rate": raw_explain["band_observed_rate"],
-        "probability_rounded_5pct": round(round(raw_explain["calibrated_p_high"] * 20.0) / 20.0, 2),
-        "predicted_tier": raw_explain["predicted_tier"],
+        "probability_display": format_probability_display(raw_explain["calibrated_p_high"]),
     }
 
     output: ExplainPitchOutput = {
@@ -489,9 +543,22 @@ def find_comparables(
             }
         )
 
+    quotable_comparables: List[ComparableQuotableRecord] = [
+        {
+            "name": str(c["name"]),
+            "release_year": int(c["release_year"]),
+            "country": str(c["country"]),
+            "network": c["network"],
+            "tier": str(c["target_tier"]),
+            "url": str(c["url"]),
+        }
+        for c in comparables
+    ]
+
     comparables_quotable: ComparablesQuotable = {
-        "summary": f"{len(comparables)} historical comparables retrieved under the 12-month rule.",
-        "caveat": "Tiers of comparables must not be quoted as probabilities for the pitch.",
+        "comparables": quotable_comparables,
+        "caveat": "comparables show similar premises; their tiers are not a probability for this pitch",
+        "scoring_note": "Similarity scores measure text premise proximity and must not be presented as probabilities.",
     }
 
     output: FindComparablesOutput = {
@@ -558,8 +625,19 @@ def what_if(
     if artifacts is None:
         artifacts = load_explain_artifacts()
 
+    meta = artifacts.get("metadata", {})
+    valid_networks = meta.get("valid_networks", [])
+
+    # Case- and whitespace-insensitive network matching for baseline
+    matched_base_net, base_net_warn = match_network(validated_pitch.get("network"), valid_networks)
+    base_pitch_to_score = copy.deepcopy(validated_pitch)
+    if matched_base_net is not None:
+        base_pitch_to_score["network"] = matched_base_net
+
     # 1. Evaluate baseline ('before')
-    before_state, before_warnings = _score_pitch(validated_pitch, artifacts)
+    before_state, before_warnings = _score_pitch(base_pitch_to_score, artifacts)
+    if base_net_warn:
+        before_warnings.append(base_net_warn)
 
     # 2. If no changes, return delta 0
     if not validated_changes:
@@ -567,14 +645,12 @@ def what_if(
             "before": {
                 "likelihood_band": before_state["likelihood_band"],
                 "observed_band_rate": TEST_BAND_OBSERVED_RATES[before_state["likelihood_band"]],
-                "probability_rounded_5pct": round(round(before_state["calibrated_p_high"] * 20.0) / 20.0, 2),
-                "predicted_tier": before_state["predicted_tier"],
+                "probability_display": format_probability_display(before_state["calibrated_p_high"]),
             },
             "after": {
                 "likelihood_band": before_state["likelihood_band"],
                 "observed_band_rate": TEST_BAND_OBSERVED_RATES[before_state["likelihood_band"]],
-                "probability_rounded_5pct": round(round(before_state["calibrated_p_high"] * 20.0) / 20.0, 2),
-                "predicted_tier": before_state["predicted_tier"],
+                "probability_display": format_probability_display(before_state["calibrated_p_high"]),
             },
         }
         output: WhatIfOutput = {
@@ -594,34 +670,36 @@ def what_if(
         json.dumps(output)
         return output
 
-    # 3. Apply changes onto modified pitch
-    modified_pitch = copy.deepcopy(validated_pitch)
-    for k, v in validated_changes.items():
-        modified_pitch[k] = v
+    # 3. Apply changes onto modified pitch with network matching
+    modified_pitch = copy.deepcopy(base_pitch_to_score)
+    applied_changes = copy.deepcopy(validated_changes)
+    change_net_warn = None
+    if "network" in applied_changes:
+        matched_change_net, change_net_warn = match_network(applied_changes["network"], valid_networks)
+        modified_pitch["network"] = matched_change_net
+        applied_changes["network"] = matched_change_net
+        for k, v in applied_changes.items():
+            if k != "network":
+                modified_pitch[k] = v
+    else:
+        for k, v in applied_changes.items():
+            modified_pitch[k] = v
 
     # 4. Evaluate modified pitch ('after') - talent priors recomputed automatically
     after_state, after_warnings = _score_pitch(modified_pitch, artifacts)
 
     # Combine unique warnings
     combined_warnings = list(dict.fromkeys(before_warnings + after_warnings))
-
-    # Network recognition check on changes
-    meta = artifacts.get("metadata", {})
-    valid_networks = meta.get("valid_networks", [])
-    if "network" in validated_changes:
-        new_net = validated_changes["network"]
-        if new_net and not is_blank_value(new_net) and new_net not in valid_networks:
-            combined_warnings.append(
-                f"Broadcaster network '{new_net}' is not one of the 57 recognized training networks; falls back to 'Other'."
-            )
+    if change_net_warn:
+        combined_warnings.append(change_net_warn)
 
     # 5. Detect blank-filling changes and compute decomposition
     blank_filled_levers = []
     for lever in ["network", "content_rating"]:
         if (
-            lever in validated_changes
+            lever in applied_changes
             and is_blank_value(validated_pitch.get(lever))
-            and not is_blank_value(validated_changes[lever])
+            and not is_blank_value(applied_changes[lever])
         ):
             blank_filled_levers.append(lever)
 
@@ -630,7 +708,7 @@ def what_if(
         country = validated_pitch["country"]
         typical_dict = COUNTRY_TYPICAL_VALUES.get(country, {"network": "Other", "content_rating": "15+"})
 
-        control_pitch = copy.deepcopy(validated_pitch)
+        control_pitch = copy.deepcopy(base_pitch_to_score)
         typical_used = {}
         for lever in blank_filled_levers:
             typ_val = typical_dict.get(lever, "Other")
@@ -660,14 +738,12 @@ def what_if(
         "before": {
             "likelihood_band": before_state["likelihood_band"],
             "observed_band_rate": TEST_BAND_OBSERVED_RATES[before_state["likelihood_band"]],
-            "probability_rounded_5pct": round(round(before_state["calibrated_p_high"] * 20.0) / 20.0, 2),
-            "predicted_tier": before_state["predicted_tier"],
+            "probability_display": format_probability_display(before_state["calibrated_p_high"]),
         },
         "after": {
             "likelihood_band": after_state["likelihood_band"],
             "observed_band_rate": TEST_BAND_OBSERVED_RATES[after_state["likelihood_band"]],
-            "probability_rounded_5pct": round(round(after_state["calibrated_p_high"] * 20.0) / 20.0, 2),
-            "predicted_tier": after_state["predicted_tier"],
+            "probability_display": format_probability_display(after_state["calibrated_p_high"]),
         },
     }
 
@@ -680,7 +756,7 @@ def what_if(
             "calibrated_p_high_delta": float(round(after_state["calibrated_p_high"] - before_state["calibrated_p_high"], 4)),
         },
         "decomposition": decomposition,
-        "changes_applied": validated_changes,
+        "changes_applied": applied_changes,
         "quotable": quotable,
         "caveat": "Results are associational, not causal; changing attachments does not guarantee audience reach shifts.",
         "warnings": list(dict.fromkeys(combined_warnings)),
