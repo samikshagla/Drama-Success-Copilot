@@ -583,7 +583,7 @@ All 9 unit and integration tests pass cleanly (`pytest tests/test_explain.py -v`
 
 #### Architecture & Index Design
 The similar-drama retrieval pipeline is encapsulated in `src/retriever.py` with standalone index builder `src/build_retriever.py`:
-- **Vector Index (`models/retriever_embeddings.npy`):** Float32 unit-normalized matrix of shape $(6,497, 384)$ ($\approx 9.52$ MB, gitignored). Nearest neighbors are computed via exact NumPy dot product ($sim = Q \cdot C^T$), taking $\approx 1$ ms with zero external C++ vector database dependencies.
+- **Vector Index (`models/retriever_embeddings.npy`):** Float32 unit-normalized matrix of shape $(6,497, 384)$ ($\approx 9.52$ MB, gitignored). The ordered list of corpus URLs and its SHA-256 digest (`retriever_embeddings.urls_sha256`) are stored alongside the matrix; passing `--cached-embeddings` strictly verifies this digest against the active corpus before loading, refusing to run on any mismatch. Nearest neighbors are computed via exact NumPy dot product ($sim = Q \cdot C^T$), taking $\approx 1$ ms with zero external C++ vector database dependencies.
 - **Embedding Model:** `sentence-transformers/all-MiniLM-L6-v2` (revision hash `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`, Apache-2.0 license, weights cached in `~/.cache/huggingface/hub` outside the repository).
 - **Metadata Table (`models/retriever_metadata.parquet`):** Compact Parquet table ($\approx 344$ KB, gitignored) storing `name`, `release_year`, `country`, `network` (null for unlisted, never the string `"Unknown"`), `target_tier`, `target_pct`, `url`, and `start_date`. **Synopsis text is strictly omitted** from the index, metadata, and runtime return payloads.
 - **12-Month Maturity & Date Rules:** Candidate pool strictly enforces `eff_candidate_start <= query_planned_start - 365 days` and query self-exclusion. Candidate dramas lacking an explicit `start_date` (35 in the corpus) are conservatively assigned Dec 31 of their release year (`f"{release_year}-12-31"`). Queries passed as a 4-digit year are conservatively assigned Jan 1 (`f"{release_year}-01-01"`).
@@ -598,16 +598,16 @@ Mean genre Jaccard similarity between query drama and top-5 retrieved neighbors:
 
 | Method | Genre Jaccard (All Top-5) [95% CI] | Genre Jaccard (Excl. Franchise) [95% CI] | Franchise Matches in Top-5 (%) |
 | :--- | :---: | :---: | :---: |
-| **Random Pool Baseline** | 0.205 [0.200, 0.211] | 0.205 [0.200, 0.210] | 0.00% |
+| **Random Pool Baseline** | 0.205 [0.200, 0.211]<br>*(100-seed: 0.205 [0.201, 0.208])* | 0.205 [0.200, 0.210]<br>*(100-seed: 0.205 [0.201, 0.208])* | 0.00% |
 | **TF-IDF (10k vocabulary)** | 0.277 [0.270, 0.283] | 0.275 [0.269, 0.281] | 0.35% |
 | **Sentence Embeddings** | **0.306 [0.300, 0.312]** | **0.305 [0.299, 0.311]** | 0.28% |
 
 *Paired Bootstrap Differences (same resampled queries; 500 resamples, seed 42):*
-- **Overall ($N = 2,252$):** Embeddings minus TF-IDF: **+0.029 [+0.023, +0.035]**; TF-IDF minus Random: **+0.072 [+0.065, +0.077]**. Both intervals strictly exclude 0.
-- **South Korea ($N = 690$):** Embeddings minus TF-IDF: **+0.034 [+0.024, +0.043]**; TF-IDF minus Random: **+0.070 [+0.060, +0.080]**.
-- **China ($N = 420$):** Embeddings minus TF-IDF: **+0.022 [+0.010, +0.036]**; TF-IDF minus Random: **+0.066 [+0.053, +0.078]**.
-- **Japan ($N = 401$):** Embeddings minus TF-IDF: **+0.035 [+0.020, +0.048]**; TF-IDF minus Random: **+0.079 [+0.064, +0.093]**.
-- **Thailand ($N = 741$):** Embeddings minus TF-IDF: **+0.026 [+0.015, +0.037]**; TF-IDF minus Random: **+0.072 [+0.062, +0.084]**.
+- **Overall ($N = 2,252$):** Embeddings minus TF-IDF: **+0.029 [+0.023, +0.035]**; TF-IDF minus Random: **+0.072 [+0.065, +0.077]** *(100-seed: +0.072 [+0.069, +0.076])*. Both intervals strictly exclude 0.
+- **South Korea ($N = 690$):** Embeddings minus TF-IDF: **+0.034 [+0.024, +0.043]**; TF-IDF minus Random: **+0.070 [+0.060, +0.080]** *(100-seed: +0.068 [+0.062, +0.073])*.
+- **China ($N = 420$):** Embeddings minus TF-IDF: **+0.022 [+0.010, +0.036]**; TF-IDF minus Random: **+0.066 [+0.053, +0.078]** *(100-seed: +0.065 [+0.058, +0.072])*.
+- **Japan ($N = 401$):** Embeddings minus TF-IDF: **+0.035 [+0.020, +0.048]**; TF-IDF minus Random: **+0.079 [+0.064, +0.093]** *(100-seed: +0.080 [+0.073, +0.087])*.
+- **Thailand ($N = 741$):** Embeddings minus TF-IDF: **+0.026 [+0.015, +0.037]**; TF-IDF minus Random: **+0.072 [+0.062, +0.084]** *(100-seed: +0.076 [+0.069, +0.080])*.
 
 ---
 
@@ -618,12 +618,12 @@ Mean genre Jaccard similarity between query drama and top-5 retrieved neighbors:
 
 | Method / Baseline | All Test Queries ($N = 2,252$) | `complete_info` Test ($N = 997$)* |
 | :--- | :---: | :---: |
-| **Random Pool Baseline** | -0.045 [-0.085, -0.003] | -0.045 [-0.111, +0.014] |
+| **Random Pool Baseline** | -0.045 [-0.085, -0.003]<br>*(100-seed: +0.003 [-0.043, +0.052])* | -0.045 [-0.111, +0.014]<br>*(100-seed: -0.003 [-0.064, +0.064])* |
 | **TF-IDF** | +0.251 [+0.211, +0.296] | +0.258 [+0.197, +0.313] |
 | **Sentence Embeddings** | +0.291 [+0.253, +0.330] | +0.293 [+0.232, +0.349] |
 | **Genre-Only Retriever** | **+0.356 [+0.324, +0.395]** | **+0.317 [+0.259, +0.372]** |
 
-*\*Note: $N = 997$ for `complete_info` because only test dramas with a synopsis can serve as retriever queries (vs. $N = 1,022$ in tabular modeling).*
+*\*Note: $N = 997$ for `complete_info` because only test dramas with a synopsis can serve as retriever queries (vs. $N = 1,022$ in tabular modeling). The single-draw random Spearman correlations (-0.045 [-0.0446 unrounded] on All Test and -0.045 [-0.0452 unrounded] on `complete_info`) are computed completely separately on their respective sample slices; across 100 independent seed draws, the random Spearman correlation centers at +0.003 and -0.003, as expected for pure random draws.*
 
 *Paired Differences on Spearman Correlation (500 resamples, seed 42):*
 - **All Test Queries ($N = 2,252$):**
@@ -640,13 +640,13 @@ Mean genre Jaccard similarity between query drama and top-5 retrieved neighbors:
 *2. Secondary Subgroup Views (Warning: Selects on Outcome):*
 - **High-Tier Queries ($N = 638$, conditioning on High outcome):**
   - Candidate Pool Base Rate: **29.8% [29.8%, 29.8%]**
-  - Random Top-5: **28.8% [27.2%, 30.6%]**
+  - Random Top-5: **28.8% [27.2%, 30.6%]** *(100-seed: 29.8% [28.3%, 31.2%], centered on candidate pool base rate of 29.8%)*
   - TF-IDF Top-5: **33.6% [31.9%, 35.3%]**
   - Genre-Only Top-5: **39.8% [37.9%, 41.7%]**
   - Sentence Embeddings Top-5: **40.9% [39.1%, 42.8%]**
 - **Low-Tier Queries ($N = 404$, symmetric view conditioning on Low outcome):**
   - Candidate Pool Base Rate: **15.9% [15.8%, 15.9%]**
-  - Random Top-5: **16.5% [15.0%, 18.1%]**
+  - Random Top-5: **16.5% [15.0%, 18.1%]** *(100-seed: 15.9% [14.6%, 17.4%], centered on candidate pool base rate of 15.9%)*
   - Sentence Embeddings Top-5: **19.1% [17.0%, 20.9%]**
   - TF-IDF Top-5: **20.9% [18.9%, 22.9%]**
   - Genre-Only Top-5: **29.0% [26.4%, 31.6%]**
@@ -678,7 +678,7 @@ Mean genre Jaccard similarity between query drama and top-5 retrieved neighbors:
 ---
 
 *Test Suite (`tests/test_retriever.py`):*
-All 8 unit and integration tests pass cleanly (`pytest tests/test_retriever.py -v` in under 30s):
+All 9 unit and integration tests pass cleanly (`pytest tests/test_retriever.py -v` in under 30s):
 1. `test_date_filter_maturity_rule`: Asserts candidate pool strictly enforces $start\_date \le query\_start - 365\text{ days}$.
 2. `test_missing_start_date_conventions`: Confirms candidates without start date default to Dec 31 of release year, and year-only queries default to Jan 1.
 3. `test_self_exclusion`: Confirms query drama is strictly excluded when querying by title/URL.
@@ -687,6 +687,7 @@ All 8 unit and integration tests pass cleanly (`pytest tests/test_retriever.py -
 6. `test_determinism`: Confirms identical queries produce identical results across calls.
 7. `test_json_serializable_and_expected_keys`: Confirms JSON round-trip serialization and presence of all schema keys.
 8. `test_no_synopsis_text_in_returned_data`: Verifies absence of synopsis text in returned payloads.
+9. `test_cached_embeddings_url_sha256_verification`: Confirms that `--cached-embeddings` validates the SHA-256 of the ordered corpus URLs stored next to the `.npy` and refuses to run on hash mismatch or missing verification file.
 *(Offline guard: Tests skip cleanly if `models/` artifacts or local HuggingFace cache are missing; zero network requests occur during testing).*
 
 ---
@@ -758,7 +759,7 @@ All dataset processing and serialized model artifacts are generated through comm
 > ```
 > Skipping: Missing artifacts or data required for tests: models/headline_model.joblib, models/isotonic_calibrator.joblib, models/background_sample.joblib, models/talent_lookup.joblib, models/metadata.joblib, data/processed/dramas_labeled.csv, data/processed/train_features_v2.csv, data/processed/test_features_v2.csv
 > ```
-> If `data/processed/` tables have been produced locally, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 17 unit and integration tests cleanly in under a minute (48s).
+> If `data/processed/` tables have been produced locally, executing `python src/build_artifacts.py` regenerates all 5 required `models/` artifacts in ~8s. Running `pytest tests/ -v` then executes and passes all 18 unit and integration tests cleanly in about a minute once the model is cached (35s; slower on a first run).
 
 
 

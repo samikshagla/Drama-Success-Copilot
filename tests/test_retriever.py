@@ -12,7 +12,8 @@ e. Output size: returns exactly k results (or len(pool) if pool < k).
 f. Determinism: identical queries produce identical results across calls.
 g. JSON-serializability: result serializes cleanly via json.dumps.
 h. Absence of synopsis text: no synopsis content or synopsis field in returned metadata.
-i. Clean skip if models/ artifacts or local HuggingFace cache are missing (no network calls).
+i. Cached embeddings URL SHA-256 verification: refuses to run on mismatch or missing file.
+j. Clean skip if models/ artifacts or local HuggingFace cache are missing (no network calls).
 """
 
 from __future__ import annotations
@@ -286,3 +287,63 @@ def test_no_synopsis_text_in_returned_data(artifacts, local_model):
         for k, v in n.items():
             if isinstance(v, str):
                 assert len(v) <= 100, f"Field '{k}' has unexpectedly long string ({len(v)} chars): {v[:40]}..."
+
+
+def test_cached_embeddings_url_sha256_verification(tmp_path):
+    """(i) Cached embeddings verification: verify SHA-256 of ordered corpus URLs next to .npy and refuse to run on mismatch."""
+    from src.build_retriever import (
+        build_retriever_artifacts,
+        compute_urls_sha256,
+        verify_cached_embeddings_urls,
+    )
+
+    data_dir = repo_root / "data/processed"
+    if not (data_dir / "synopses_clean.csv").exists():
+        pytest.skip("data/processed/synopses_clean.csv missing")
+
+    # Load actual corpus URLs
+    df_syn = pd.read_csv(data_dir / "synopses_clean.csv")[["url", "synopsis_clean"]]
+    df_lab = pd.read_csv(data_dir / "dramas_labeled.csv")[["url"]]
+    df = pd.merge(df_syn, df_lab, on="url")
+    valid_mask = df["synopsis_clean"].astype(str).str.strip().str.len() > 0
+    corpus_urls = df.loc[valid_mask, "url"].astype(str).tolist()
+
+    # 1. Matching case
+    matching_hash = compute_urls_sha256(corpus_urls)
+    npy_file = tmp_path / "test_emb.npy"
+    np.save(npy_file, np.zeros((len(corpus_urls), 4), dtype=np.float32))
+
+    sha_file = tmp_path / "test_emb.urls_sha256"
+    sha_file.write_text(matching_hash + "\n", encoding="utf-8")
+
+    verified = verify_cached_embeddings_urls(npy_file, corpus_urls)
+    assert verified == matching_hash
+
+    # 2. Mismatch case (tampered or wrong order): must raise ValueError
+    tampered_hash = compute_urls_sha256(list(reversed(corpus_urls)))
+    sha_file.write_text(tampered_hash + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Corpus URL SHA-256 mismatch"):
+        verify_cached_embeddings_urls(npy_file, corpus_urls)
+
+    with pytest.raises(ValueError, match="Corpus URL SHA-256 mismatch"):
+        build_retriever_artifacts(
+            data_dir=data_dir,
+            output_dir=tmp_path / "out",
+            cached_embeddings_path=npy_file,
+            verbose=False,
+        )
+
+    # 3. Missing verification file: must raise FileNotFoundError
+    sha_file.unlink()
+    with pytest.raises(FileNotFoundError, match="Missing URL verification file"):
+        verify_cached_embeddings_urls(npy_file, corpus_urls)
+
+    with pytest.raises(FileNotFoundError, match="Missing URL verification file"):
+        build_retriever_artifacts(
+            data_dir=data_dir,
+            output_dir=tmp_path / "out",
+            cached_embeddings_path=npy_file,
+            verbose=False,
+        )
+
