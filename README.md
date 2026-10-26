@@ -478,7 +478,7 @@ All metadata, actual audience reach percentiles, and attributions below are gene
 
 #### Case 1: True Positive  *Who Rules the World (2022)*
 *China | Tencent Video | Content Rating: 13+ | 40 Episodes | Mon/Tue/Wed*
-- **Creators:** Director: Yin Tao, Yu Yong Gang | Screenwriter: Zhang Wei, Shang Meng Lu | Lead Cast: Yang Yang, Zhao Lu Si
+- **Creators:** Director: Director whose earlier dramas averaged around the 67th percentile | Screenwriter: Screenwriter whose earlier dramas averaged around the 69th percentile | Lead Cast: Lead cast whose earlier dramas averaged around the 76th percentile
 - **Audience Metrics:** 58,733 watchers (China cohort size 532). Exact reach: **99.4%** (**99th percentile**, High Tier).
 - **Model Forecast:** Predicted Tier: **High** | Raw $P(\text{High})$: **0.9814** | Calibrated $P(\text{High})$: **1.0000** | Band: **Very likely**
 - **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($+0.7320$) = Raw $P(\text{High})$ ($0.9814$) (exact machine precision match).
@@ -495,7 +495,7 @@ All metadata, actual audience reach percentiles, and attributions below are gene
 
 #### Case 2: True Negative  *The Royal Bracelet (2024)*
 *Thailand | Channel 7 | Content Rating: G | 30 Episodes | Mon/Tue/Wed/Thu/Fri*
-- **Creators:** Director: Sayom Sungvaributr, Prathum Mitphakdee | Screenwriter: Kanchana Wongpuapan | Lead Cast: Poom Kiatipoom Banluechairit, Chingching Kharittha Sungsaopath
+- **Creators:** Director: Director whose earlier dramas averaged around the 43rd percentile | Screenwriter: Screenwriter whose earlier dramas averaged around the 42nd percentile | Lead Cast: Lead cast whose earlier dramas averaged around the 34th percentile
 - **Audience Metrics:** 90 watchers (Thailand cohort size 216). Exact reach: **15.3%** (**15th percentile**, Low Tier).
 - **Model Forecast:** Predicted Tier: **Low** | Raw $P(\text{High})$: **0.0042** | Calibrated $P(\text{High})$: **0.0000** | Band: **Unlikely**
 - **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.2452$) = Raw $P(\text{High})$ ($0.0042$).
@@ -512,7 +512,7 @@ All metadata, actual audience reach percentiles, and attributions below are gene
 
 #### Case 3: False Negative (Actual High, Predicted Medium)  *This Love Doesn't Have Long Beans (2024)*
 *Thailand | iQiyi / One 31 | Content Rating: 13+ | 8 Episodes | Friday*
-- **Creators:** Director: Nui Suttasit Dechinthanarak | Screenwriter: Yui Kanokphan, Eng Issaraporn, Fleur Irene | Lead Cast: Pon Thanapon Aiemkumchai, Sailub Hemmawich Kwanamphaiphan
+- **Creators:** Director: Director whose earlier dramas averaged around the 52nd percentile | Screenwriter: Screenwriters whose earlier dramas averaged around the 46th percentile | Lead Cast: Lead cast whose earlier dramas averaged around the 42nd percentile
 - **Audience Metrics:** 25,699 watchers (Thailand cohort size 216). Exact reach: **92.6%** (**93rd percentile**, High Tier).
 - **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.0362** | Calibrated $P(\text{High})$: **0.0202** | Band: **Unlikely**
 - **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.2132$) = Raw $P(\text{High})$ ($0.0362$).
@@ -529,7 +529,7 @@ All metadata, actual audience reach percentiles, and attributions below are gene
 
 #### Case 4: Missing Talent Attribution  *Shine (Orchestric Ver.) (2025)*
 *Thailand | WeTV | Content Rating: 18+ | 8 Episodes | Saturday*
-- **Creators:** Director: Jean Khamkwan Duangmanee (Debut / no earlier history) | Screenwriter: Bua Parida Manomaiphibul, Den Panuwat Inthawat (Debut / no earlier history) | Lead Cast: Apo Nattawin Wattanagitiphat, Mile Phakphum Romsaithong
+- **Creators:** Director: Director with no qualifying earlier dramas (Missing history (NaN)) | Screenwriter: Screenwriters with no qualifying earlier dramas (Missing history (NaN)) | Lead Cast: Lead cast whose earlier dramas averaged around the 48th percentile
 - **Audience Metrics:** 17,674 watchers (Thailand cohort size 167). Exact reach: **89.8%** (**90th percentile**, High Tier).
 - **Model Forecast:** Predicted Tier: **Medium** | Raw $P(\text{High})$: **0.1849** | Calibrated $P(\text{High})$: **0.1284** | Band: **Unlikely**
 - **Additivity Verification:** Base Value ($0.2494$) + $\sum \text{SHAP}$ ($-0.0645$) = Raw $P(\text{High})$ ($0.1849$).
@@ -554,7 +554,7 @@ The production explainability pipeline is encapsulated in `src/explain.py`:
   *(Note: The model was trained with priors drawn from earlier train dramas only, while the app lookup indexes all historical labeled dramas up to the 12-month cutoff; Milestone 4 V1 vs V2 results [$\approx 0.005$ ROC-AUC difference] demonstrate that expanding the prior pool has minimal effect on ranking. Also note that the model was fitted on dramas up to 2021 and has not seen 2022–2025 feature distributions).*
 
 *Test Suite (`tests/test_explain.py`):*
-All 9 unit and integration tests pass cleanly (`pytest tests/test_explain.py -v` in under a minute):
+All 34 unit and integration tests pass cleanly (`pytest tests/test_explain.py -v` in about one to five minutes depending on whether the embedding model is cached):
 1. `test_shap_additivity_5_dramas`: Verifies $\text{base\_value} + \sum \text{attributions} = \text{raw\_p\_high}$ within $1e-9$ across 5 diverse test pitches.
 2. `test_json_serializable_and_expected_keys`: Confirms JSON round-trip serialization and presence of all schema keys.
 3. `test_no_talent_history_returns_nan_reach_and_warning`: Asserts debut creators receive `NaN` reach and the warning `"No qualifying prior credits found within the 12-month rule; feature set to missing"`.
@@ -562,6 +562,8 @@ All 9 unit and integration tests pass cleanly (`pytest tests/test_explain.py -v`
 5. `test_two_seeds_agree_on_sign_and_top_group_for_3_dramas`: Confirms random seeds 42 and 123 identify the identical top driver group and sign.
 6. `test_feature_builder_reproduces_training_table_values_for_20_random_test_dramas`: Validates that `build_feature_row` reconstructs all 47 features for 20 test dramas matching pre-computed features to machine precision.
 7. `test_no_prior_used_starts_after_planned_start_minus_365_days`: Verifies strict exclusion of prior credits within 365 days of planned premiere.
+8. `test_saved_model_reproduces_test_metrics`: Recomputes test set ROC-AUC and PR-AUC using serialized models and asserts exact reproduction of benchmark metrics.
+9. `test_likelihood_band_boundary_thresholds`: 26 parametrized test cases asserting exact boundary assignments, step-function plateaus, and floating-point tolerance bounds.
 
 ---
 
@@ -678,7 +680,7 @@ Mean genre Jaccard similarity between query drama and top-5 retrieved neighbors:
 ---
 
 *Test Suite (`tests/test_retriever.py`):*
-All 9 unit and integration tests pass cleanly (`pytest tests/test_retriever.py -v` in under 30s):
+All 9 unit and integration tests pass cleanly (`pytest tests/test_retriever.py -v` in about one to five minutes depending on whether the embedding model is cached):
 1. `test_date_filter_maturity_rule`: Asserts candidate pool strictly enforces $start\_date \le query\_start - 365\text{ days}$.
 2. `test_missing_start_date_conventions`: Confirms candidates without start date default to Dec 31 of release year, and year-only queries default to Jan 1.
 3. `test_self_exclusion`: Confirms query drama is strictly excluded when querying by title/URL.
@@ -699,8 +701,8 @@ To enable an autonomous decision agent to interact reliably with the prediction,
 
 1. **`explain_pitch(pitch)`:**
    - **Inputs:** `PitchInput` containing `country`, `network` (nullable), `genres`, `content_rating` (nullable), `weekdays`, `episodes`, `directors`, `writers`, `lead_cast`, `planned_start` (date or 4-digit year), and optional `synopsis_text` (used strictly for comparables).
-   - **Outputs:** `ExplainPitchOutput` containing sanitized `pitch_summary`, `prediction` (raw $P(\text{High})$, isotonic-calibrated $P(\text{High})$, `predicted_tier` labeled with `tier_note: "most likely tier among three (model argmax)"`, likelihood band, and observed test band rate), `quotable` block (`likelihood_band`, `observed_band_rate`, and `probability_display`), global and local SHAP `attributions`, `top_positive_drivers`, `top_negative_drivers`, data quality `warnings`, and modeling `caveats`.
-   - **Behavior:** Re-maps input attributes to the exact 47 tabular modeling features, checks broadcaster against the 57 recognized training networks case- and whitespace-insensitively (e.g., `"JTBC"` automatically maps to `"jTBC"`, emitting difflib suggestions when unrecognized), queries rolling talent history under the 12-month rule, evaluates calibrated GBDT probabilities, and computes Monte Carlo SHAP group attributions with human-readable rationale text.
+   - **Outputs:** `ExplainPitchOutput` containing sanitized `pitch_summary`, `prediction` (raw $P(\text{High})$, isotonic-calibrated $P(\text{High})$, `predicted_tier` labeled with `tier_note: "most likely tier among three (model argmax)"`, likelihood band, and observed test band rate), `quotable` block (`likelihood_band` and `observed_band_rate`), global and local SHAP `attributions`, `top_positive_drivers`, `top_negative_drivers`, data quality `warnings`, and modeling `caveats`.
+   - **Behavior:** Re-maps input attributes to the exact 47 tabular modeling features, checks broadcaster against the 57 recognized training networks case- and whitespace-insensitively (e.g., `"JTBC"` automatically maps to `"jTBC"`, emitting suggestions only when difflib similarity $\ge 0.8$, and falling back to `"Other"` with no suggestions when nothing is close), queries rolling talent history under the 12-month rule, evaluates calibrated GBDT probabilities, and computes Monte Carlo SHAP group attributions with human-readable rationale text.
 
 2. **`find_comparables(pitch, k=5)`:**
    - **Inputs:** `pitch` containing `synopsis_text`, `planned_start`, and `country`; optional retrieval size `k` (default: 5).
@@ -711,14 +713,23 @@ To enable an autonomous decision agent to interact reliably with the prediction,
    - **Inputs:** Base `pitch` and a dictionary of modified `changes`.
    - **Allowed Levers (Pitch Decisions):** Strictly restricted to `network`, `genres`, `content_rating`, `directors`, `writers`, and `lead_cast`.
    - **Disallowed Levers:** Strictly rejects `episodes`, `weekdays`, `country`, and `planned_start` with an explicit `ValueError`. Rejects submissions with more than 3 changes.
-   - **Blank-Field Decomposition & Typical-Value Control:** When changes fill previously blank fields (`network`, `content_rating`), returns in addition to the total delta an exact decomposition: (a) the effect of filling the blank with the most common train value for that country (`"typical_value_control_delta"`), and (b) the remaining effect of the specific choice relative to that control (`"specific_choice_delta"`). Appends warning: `"part of this change reflects the model's lower P(high) when a field is blank"`.
-     - *Training Empirical Modes by Country:*
-       - **South Korea:** Broadcaster: `"Naver TV Cast"`, Content Rating: `"15+"`
-       - **China:** Broadcaster: `"iQiyi"`, Content Rating: `"13+"`
-       - **Japan:** Broadcaster: `"NHK"`, Content Rating: `"13+"`
-       - **Thailand:** Broadcaster: `"Channel 7"`, Content Rating: `"G"`
-     - *Advisory Note:* This typical-value control uses the empirical mode from training cohorts ($\le 2021$) and is strictly a statistical baseline control to isolate page-completeness bias, **NOT an industry greenlight recommendation**.
-   - **Outputs:** `WhatIfOutput` containing `before` and `after` states (raw $P(\text{High})$, calibrated $P(\text{High})$, predicted tier, likelihood band), calculated deltas (`raw_p_high_delta`, `calibrated_p_high_delta`), `decomposition` (if blanks were filled), `changes_applied`, `quotable` block (for before and after), warnings (including 57-networks check), and the fixed associational caveat: `"Results are associational, not causal; changing attachments does not guarantee audience reach shifts."`.
+   - **Blank-Field Decomposition & Marginal-Distribution Control:** When changes fill previously blank fields (`network`, `content_rating`), returns in addition to total delta an exact decomposition:
+     1. **Marginal Distribution Control (Primary):** The expected predicted raw and calibrated $P(\text{High})$ over the country's training distribution of values for the filled fields. When multiple fields are filled (e.g., both `network` and `content_rating`), the expectation is evaluated over the **empirical joint distribution** of those fields in training cohorts ($\le 2021$) for that country ($N \le 50$ distinct joint pairs per country), preserving real broadcaster-rating co-occurrence rather than assuming marginal independence.
+     2. **Decomposition Shares on the Raw Scale:** Because calibrated probabilities are step functions, decomposition shares are strictly reported on the **raw continuous model scale**:
+        - Marginal Control Share: $\Delta_{\text{raw\_marginal}} / \Delta_{\text{raw\_total}}$
+        - Specific Choice Share: $\Delta_{\text{raw\_specific}} / \Delta_{\text{raw\_total}}$
+     3. **Calibrated Deltas as Step-Function Values:** The corresponding calibrated deltas are marked as **step-function values, not measurements** to emphasize that discrete plateau jumps must not be interpreted as continuous probability increments.
+     4. **Mode-Based Control (Secondary):** Evaluates the pitch with blanks filled by the single most common training value (`"mode_control_delta"` vs `"mode_specific_choice_delta"`).
+     - *Empirical Verification on Fixture 05 (South Korea Crime Pitch filling network: JTBC, content_rating: 15+):*
+       - **Total Delta:** Raw $+0.2940$ ($100.0\%$), Calibrated $+0.1800$ (moving from $0.0200$ [Unlikely] to $0.2000$ [Possible]).
+       - **Marginal Control Part (Joint Distribution):** Raw $+0.1998$ (**68.0% of raw gain**), Calibrated $+0.1294$ (*step-function value, not a measurement*).
+       - **Specific Choice Part (JTBC & 15+):** Raw $+0.0942$ (**32.0% of raw gain**), Calibrated $+0.0506$ (*step-function value, not a measurement*).
+       - **Mode Control Part (Secondary):** Raw $+0.0649$, Calibrated $+0.0133$ (Mode: `"Naver TV Cast"`, `"15+"`).
+       - **Mode Specific Choice Part:** Raw $+0.2291$, Calibrated $+0.1667$.
+     - For fixture 05 about two thirds of the raw gain comes from the fields being filled in, so what_if memos must state that the lift is mostly the blank-field effect.
+     - Appends warning: `"part of this change reflects the model's lower P(high) when a field is blank; marginal and mode controls decompose this baseline lift."`.
+   - **Band Boundary Warning:** When `before` or `after` sits within one plateau of a band boundary ($0.20, 0.50, 0.75$) or the likelihood band changes, adds: `"band edges are approximate: the calibrator is a step function"`.
+   - **Outputs:** `WhatIfOutput` containing `before` and `after` states (raw $P(\text{High})$, calibrated $P(\text{High})$, predicted tier, likelihood band), calculated deltas (`raw_p_high_delta`, `calibrated_p_high_delta`), `decomposition` (if blanks were filled), `changes_applied`, `quotable` block (for before and after), `band_boundary_warning` (if near boundary or band changed), warnings, and the fixed associational caveat: `"Results are associational, not causal; changing attachments does not guarantee audience reach shifts."`.
    - **Behavior:** Recomputes talent prior reach for altered creative personnel using the 12-month rule relative to `planned_start - 365 days`.
 
 ---
@@ -726,21 +737,43 @@ To enable an autonomous decision agent to interact reliably with the prediction,
 #### Validation, Prompt-Injection Safety & Schema Design
 - **Schema Implementation (`TypedDict` + Explicit Runtime Validators):**
   Implemented using Python standard library `typing.TypedDict` paired with strict functional validators (`validate_pitch`, `validate_what_if_changes`, `sanitize_string`, `sanitize_string_list`, `match_network`). This guarantees zero external dependencies (avoiding Pydantic version mismatches and SDK overhead), enables native JSON serialization without schema conversion hazards, and enforces deterministic typing.
-- **Quotable Block & Downstream Quoting Mandate:**
-  Each tool output provides a standardized `quotable` block:
+- **Calibrator Plateau Structure & Quotable Block Quoting Mandate:**
+  The isotonic calibrator outputs a discrete step function with **35 unique plateaus** (e.g. $7/12 \approx 0.5833$, $0.5000$, $0.2000$, $0.0000$). Analysis of the out-of-fold training predictions ($N=2,609$) reveals that **15 of these 35 plateaus have fewer than 50 training points behind them** (for instance, plateau $0.7500$ has only $N=4$ points, and plateau $0.1667$ has $N=12$ points).
+  
+  | Plateau Value | Formula / Fraction | Out-of-Fold $N$ | in-sample mean by construction (isotonic plateaus equal the in-sample mean of their points) | Flag ($N < 50$) |
+  |:---:|:---:|:---:|:---:|:---:|
+  | `0.0000` | $0/198$ | 198 | $0.0000$ | *(Fixture 05 baseline)* |
+  | `0.1667` | $2/12$ | 12 | $0.1667$ | **Flag ($N < 50$)** |
+  | `0.2000` | $29/145$ | 145 | $0.2000$ | *(Band edge 0.20; Fixture 05 after)* |
+  | `0.2713` | $51/188$ | 188 | $0.2713$ | *(Fixture 11)* |
+  | `0.5000` | $47/94$ | 94 | $0.5000$ | *(Band edge 0.50)* |
+  | `0.5833` | $35/60$ | 60 | $0.5833$ | *(Fixture 01)* |
+  | `0.7500` | $3/4$ | 4 | $0.7500$ | **Flag ($N < 50$)** *(Band edge 0.75)* |
+  
+  > [!NOTE]
+  > **Held-Out Evidence vs. Plateau Table:** The plateau observed rates above reflect the in-sample mean by construction (isotonic plateaus equal the in-sample mean of their assigned points on expanding-window out-of-fold calibration data). **The held-out evidence is the test-set band rates, not the plateau table.**
+  
+  Because continuous probabilities or fine-grained displays would imply spurious precision over a coarse step function, the memo-facing `quotable` block retains strictly qualitative bands and empirical test-set rates:
   ```json
   "quotable": {
     "likelihood_band": "Likely",
-    "observed_band_rate": "57.8% [95% CI: 52.6%, 62.9%] (N=351; observed on test dramas released 2022-2025, relative to dramas of the same country and year)",
-    "probability_display": "60%"
+    "observed_band_rate": "57.8% [95% CI: 52.6%, 62.9%] (N=351; observed on test dramas released 2022-2025, relative to dramas of the same country and year)"
   }
   ```
   > [!IMPORTANT]
   > **Downstream Quoting Rule:**
   > 1. Downstream text (including LLM greenlight memos and UI summaries) **may only quote values from this `quotable` block**.
-  > 2. Exact unrounded continuous probabilities (e.g. `0.5833`) must **not** be quoted directly; the block formats probabilities as `probability_display` (`"under 5%"` / `"over 95%"` at the 0.02/0.98 clip bounds, and rounded 5% increments elsewhere; never `0.00` or `1.00`).
-  > 3. `predicted_tier` is excluded from the `quotable` block because the 3-class argmax can select High while calibrated probability is only 25%; it remains in the prediction block strictly labeled as `"most likely tier among three (model argmax)"`.
-  > 4. For `find_comparables`, the quotable block provides only the returned drama records (`name`, `release_year`, `country`, `network`, `tier`, `url`) and premise caveat. Similarity scores measure textual logline proximity and must **never** be presented as success probabilities.
+  > 2. For `explain_pitch` and `what_if`, only `likelihood_band` and `observed_band_rate` are quotable.
+  > 3. For `find_comparables`, only the returned drama records (`name`, `release_year`, `country`, `network`, `tier`, `url`) and the fixed premise caveat (`"comparables show similar premises; their tiers are not a probability for this pitch"`) are quotable.
+  > 4. `predicted_tier` is excluded from the `quotable` block because the 3-class argmax can select High while calibrated probability is only 25%; it remains in the prediction block strictly labeled as `"most likely tier among three (model argmax)"`.
+  > 5. Similarity scores measure textual logline proximity and must **never** be presented as success probabilities.
+  
+  *Plateau Assignments for Representative Fixtures:*
+  - **Fixture 01 (`pitch_01_complete_kr_thriller`):** Raw $0.7184 \implies$ Plateau 23 ($0.5833 = 7/12$), $N=60$ training points, observed rate $0.5833$ ($\ge 50$, not flagged). Band: `"Likely"`.
+  - **Fixture 05 (`pitch_05_blank_network_and_rating`):** Raw $0.0138 \implies$ Plateau 1 ($0.0000$, pre-clip), $N=198$ training points, observed rate $0.0000$ ($\ge 50$, not flagged; clipped to $0.0200$). Band: `"Unlikely"`.
+  - **Fixture 11 (`pitch_11_injection_ignore_instructions`):** Raw $0.3683 \implies$ Plateau 16 ($0.2713 = 51/188$), $N=188$ training points, observed rate $0.2713$ ($\ge 50$, not flagged). Band: `"Possible"`.
+- **Network Matching & Difflib Cutoff (0.8):**
+  Matches user-typed broadcasters to the 57 valid training networks case- and whitespace-insensitively. Difflib cutoff is set to 0.8: typos matching $\ge 0.8$ (e.g. `"jTBC1"` $\to$ `"jTBC"`) emit `"Did you mean: 'jTBC'?"`, while completely unrecognized networks (e.g. `"Acorn TV Streaming"`, `"HBO Max"`) emit a clean warning that the network is unrecognized and falls back to `"Other"`, **with no suggestions**.
 - **Input Sanitization & Length Bounds:**
   - Standard strings: capped at $\le 200$ characters.
   - Synopsis text: capped at $\le 2000$ characters.
@@ -765,7 +798,7 @@ To enable an autonomous decision agent to interact reliably with the prediction,
   - 2 debut talent pitches (introducing unindexed directors and screenwriters).
   - 2 adversarial injection pitches (testing prompt overrides and JSON break attempts).
 - **Test Suite Results:**
-  All 15 unit and integration tests pass cleanly (`pytest tests/test_agent_tools.py -v` in $\approx 37$s):
+  All 16 unit and integration tests pass cleanly (`pytest tests/test_agent_tools.py -v` in about one to five minutes depending on whether the embedding model is cached):
   1. `test_validate_pitch_valid`: Validates parsing and normalization across complete fixtures.
   2. `test_validate_pitch_invalid_country`: Rejects unsupported countries.
   3. `test_validate_pitch_missing_start`: Rejects pitches lacking premiere date/year.
@@ -774,15 +807,16 @@ To enable an autonomous decision agent to interact reliably with the prediction,
   6. `test_what_if_max_changes_limit`: Rejects requests attempting $>3$ simultaneous modifications.
   7. `test_what_if_empty_changes_gives_delta_zero`: Verifies that empty changes return an identical `after` state and zero delta.
   8. `test_what_if_talent_change_recomputes_priors`: Dynamically selects talent from lookup at runtime and asserts rolling percentiles recompute.
-  9. `test_what_if_blank_filling_decomposition_and_warning`: Tested on fixture `pitch_05`; asserts exact additive decomposition of typical value control vs specific choice and presence of blank-field artifact warning.
-  10. `test_unrecognized_network_emits_57_networks_warning`: Asserts case/whitespace-insensitive match for known networks and emits warning with difflib suggestions for unrecognized broadcasters.
-  11. `test_no_synopsis_text_in_tool_outputs`: Enforces that no synopsis text or keys appear in any output dictionary.
-  12. `test_prompt_injection_treated_as_plain_data`: Verifies adversarial prompts are treated as literal strings without crashing or altering execution.
-  13. `test_injection_control_identical_predictive_outputs`: Asserts that replacing prompt injection with neutral text yields 100% identical `explain_pitch` and `what_if` outputs while only `find_comparables` differs.
-  14. `test_quotable_blocks_present_and_formatted`: Verifies presence and valid formatting of `quotable` blocks across all three tools, excluding predicted_tier and formatting probability_display.
-  15. `test_outputs_deterministic_and_json_serializable`: Asserts identical repeated executions and valid `json.dumps()` round-tripping.
+  9. `test_what_if_blank_filling_decomposition_and_warning`: Tested on fixture `pitch_05`; asserts exact additive decomposition of marginal control and secondary mode control, and presence of blank-field artifact warning.
+  10. `test_what_if_band_boundary_warning`: Asserts band boundary warning triggers when near step boundaries or when likelihood band shifts.
+  11. `test_unrecognized_network_emits_57_networks_warning`: Asserts case/whitespace-insensitive match for known networks, cutoff 0.8 suggestions for typos, and no suggestions for unrecognized broadcasters.
+  12. `test_no_synopsis_text_in_tool_outputs`: Enforces that no synopsis text or keys appear in any output dictionary.
+  13. `test_prompt_injection_treated_as_plain_data`: Verifies adversarial prompts are treated as literal strings without crashing or altering execution.
+  14. `test_injection_control_identical_predictive_outputs`: Asserts that replacing prompt injection with neutral text yields 100% identical `explain_pitch` and `what_if` outputs while only `find_comparables` differs.
+  15. `test_quotable_blocks_present_and_formatted`: Verifies presence and valid formatting of `quotable` blocks across all three tools, excluding predicted_tier and dropping continuous probabilities.
+  16. `test_outputs_deterministic_and_json_serializable`: Asserts identical repeated executions and valid `json.dumps()` round-tripping.
 
-*(Total test suite across all modules: 33 tests passing).*
+*(Total test suite across all modules: 59 tests passing).*
 
 ---
 
@@ -794,9 +828,9 @@ To enable an autonomous decision agent to interact reliably with the prediction,
 3. **Rolling 12-Month Maturity Enforcement:**
    All talent prior lookups and comparable candidate pools strictly exclude titles released within 365 days of the query drama's planned premiere date. This guarantees that unreleased or concurrent dramas cannot leak forward-looking popularity data into the simulation.
 4. **Missing-Field Penalty Transparency:**
-   Agent reasoning must account for page completeness artifacts: an unlisted broadcaster or unrated pitch receives a negative attribution because blank fields in the training corpus strongly correlate with low-budget, obscure titles, not because viewers penalize missing metadata.
+   Agent reasoning must account for page completeness artifacts: an unlisted broadcaster or unrated pitch receives a negative attribution because blank fields in the training corpus strongly correlate with low-budget, obscure titles, not because viewers penalize missing metadata. For fixture 05 about two thirds of the raw gain comes from the fields being filled in, so what_if memos must state that the lift is mostly the blank-field effect.
 5. **Quotable Block Mandate:**
-   To prevent false certainty and spurious decimal precision in executive memorandums, downstream agents and interfaces are strictly constrained to quoting the rounded 5% probabilities and empirical observed test rates provided in the `quotable` block. Exact continuous model outputs must not be quoted.
+   To prevent false certainty and spurious decimal precision in executive memorandums, downstream agents and interfaces are strictly constrained to quoting the qualitative likelihood bands and empirical observed test-set rates provided in the `quotable` block (`likelihood_band` and `observed_band_rate`). Continuous probabilities, pseudo-continuous displays, and step-function values must not be quoted.
 
 ---
 
@@ -864,8 +898,8 @@ All dataset processing and serialized model artifacts are generated through comm
 
 > [!IMPORTANT]
 > **Fresh-Clone Test Behavior & Artifact Guard:**
-> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 33 tests with clear skip indicators.
-> If `data/processed/` tables and models have been produced locally, executing `python src/build_artifacts.py` and `python src/build_retriever.py` regenerates all required artifacts. Running `pytest tests/ -v` then executes and passes all 33 unit and integration tests cleanly in under a minute (9 in `tests/test_explain.py`, 9 in `tests/test_retriever.py`, and 15 in `tests/test_agent_tools.py`).
+> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 59 tests with clear skip indicators.
+> If `data/processed/` tables and models have been produced locally, executing `python src/build_artifacts.py` and `python src/build_retriever.py` regenerates all required artifacts. Running `pytest tests/ -v` then executes and passes all 59 unit and integration tests cleanly in about one to five minutes depending on whether the embedding model is cached (34 in `tests/test_explain.py`, 9 in `tests/test_retriever.py`, and 16 in `tests/test_agent_tools.py`).
 
 
 

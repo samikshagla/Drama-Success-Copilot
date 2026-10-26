@@ -102,8 +102,8 @@ DIVERSE_5_DRAMAS = [
         "content_rating": "13+",
         "weekdays": ["Monday", "Tuesday", "Wednesday"],
         "episodes": 40,
-        "director": "Yin Tao",
-        "cast": ["Yang Yang", "Zhao Lu Si"],
+        "director": "Director Alpha",
+        "cast": ["Actor Alpha", "Actor Beta"],
         "planned_start_date": "2022-04-18"
     },
     {
@@ -114,8 +114,8 @@ DIVERSE_5_DRAMAS = [
         "content_rating": "13+",
         "weekdays": ["Monday", "Tuesday", "Wednesday", "Thursday"],
         "episodes": 30,
-        "director": "Thanapol Phangdee",
-        "cast": ["Thanwa Suriyajak", "Tubtim Anyarin Terathananpat"],
+        "director": "Director Gamma",
+        "cast": ["Actor Delta", "Actor Epsilon"],
         "planned_start_date": "2024-01-15"
     },
     {
@@ -126,8 +126,8 @@ DIVERSE_5_DRAMAS = [
         "content_rating": "15+",
         "weekdays": ["Saturday", "Sunday"],
         "episodes": 16,
-        "director": "Kim Won-seok",
-        "cast": ["IU", "Lee Sun-kyun"],
+        "director": "Director Zeta",
+        "cast": ["Actor Eta", "Actor Theta"],
         "planned_start_date": "2024-05-01"
     },
     {
@@ -408,20 +408,43 @@ def test_saved_model_reproduces_test_metrics(artifacts):
     assert np.isclose(f1, 0.6557, atol=0.005), f"Macro-F1 mismatch: {f1}"
 
 
-def test_likelihood_band_boundary_thresholds():
-    """Verify band_for(p) strictly follows 0.20, 0.50, 0.75 thresholds at boundaries."""
+BAND_FOR_TEST_CASES = [
+    # Boundary and tolerance cases (1e-9 tolerance convention: value within tol below edge or equal belongs to upper band)
+    (0.0, "Unlikely"),
+    (0.199, "Unlikely"),
+    (0.20 - 1e-8, "Unlikely"),
+    (0.20 - 1e-10, "Possible"),  # within 1e-9 tolerance below edge -> upper band
+    (0.20, "Possible"),
+    (0.20 + 1e-10, "Possible"),
+    (0.499, "Possible"),
+    (0.50 - 1e-8, "Possible"),
+    (0.50 - 1e-10, "Likely"),    # within 1e-9 tolerance below edge -> upper band
+    (0.50, "Likely"),
+    (0.50 + 1e-10, "Likely"),
+    (0.749, "Likely"),
+    (0.75 - 1e-8, "Likely"),
+    (0.75 - 1e-10, "Very likely"),  # within 1e-9 tolerance below edge -> upper band
+    (0.75, "Very likely"),
+    (0.75 + 1e-10, "Very likely"),
+    (1.0, "Very likely"),
+    # Stored calibrator plateau values
+    (0.16666666666666666, "Unlikely"),
+    (0.2, "Possible"),
+    (0.24999999999999997, "Possible"),
+    (0.41509433962264153, "Possible"),
+    (0.5, "Likely"),
+    (0.5333333333333333, "Likely"),
+    (0.6909090909090909, "Likely"),
+    (0.75, "Very likely"),
+    (0.7592592592592593, "Very likely"),
+]
+
+
+@pytest.mark.parametrize("p, expected", BAND_FOR_TEST_CASES)
+def test_likelihood_band_boundary_thresholds(p, expected):
+    """Verify band_for(p) strictly follows 0.20, 0.50, 0.75 thresholds with 1e-9 tolerance and handles stored plateaus."""
     from src.explain import band_for
-    boundary_cases = [
-        (0.0, "Unlikely"),
-        (0.199, "Unlikely"),
-        (0.20, "Possible"),
-        (0.499, "Possible"),
-        (0.50, "Likely"),
-        (0.749, "Likely"),
-        (0.75, "Very likely"),
-        (1.0, "Very likely"),
-    ]
-    for p, expected in boundary_cases:
-        assert band_for(p) == expected, f"band_for({p}) returned {band_for(p)}, expected {expected}"
+
+    assert band_for(p) == expected
 
 

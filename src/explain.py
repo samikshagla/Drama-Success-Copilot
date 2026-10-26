@@ -59,13 +59,21 @@ TEST_BAND_OBSERVED_RATES = {
 }
 
 
-def band_for(cal_p_high: float) -> str:
-    """Return likelihood band for a calibrated P(High) probability using standard 0.20, 0.50, 0.75 cutoffs."""
-    if cal_p_high < 0.20:
+def band_for(cal_p_high: float, tol: float = 1e-9) -> str:
+    """
+    Return likelihood band for a calibrated P(High) probability using standard 0.20, 0.50, 0.75 cutoffs.
+    Robust to floating-point noise with tolerance 1e-9; values within tol below an edge or equal/above
+    belong to the upper band:
+    - [0.00, 0.20): Unlikely
+    - [0.20, 0.50): Possible
+    - [0.50, 0.75): Likely
+    - [0.75, 1.00]: Very likely
+    """
+    if cal_p_high < 0.20 - tol:
         return "Unlikely"
-    elif cal_p_high < 0.50:
+    elif cal_p_high < 0.50 - tol:
         return "Possible"
-    elif cal_p_high < 0.75:
+    elif cal_p_high < 0.75 - tol:
         return "Likely"
     else:
         return "Very likely"

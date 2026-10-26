@@ -129,7 +129,7 @@ def test_what_if_max_changes_limit(pitches):
         "network": "JTBC",
         "genres": ["Comedy"],
         "content_rating": "15+",
-        "directors": ["Bong Joon Ho"],
+        "directors": ["Director Delta"],
     }
     with pytest.raises(ValueError, match="at most 3 changes"):
         what_if(p, four_changes)
@@ -171,8 +171,9 @@ def test_what_if_talent_change_recomputes_priors(pitches, explain_artifacts):
 def test_what_if_blank_filling_decomposition_and_warning(pitches, explain_artifacts):
     """
     Asserts what_if detects when blank fields are filled, decomposes total delta into:
-    (a) typical value control effect, and (b) remaining specific choice effect,
-    and appends the blank-field artifact warning. Tested using pitch_05.
+    (a) marginal distribution control effect across training frequencies, and
+    (b) specific choice effect relative to that control.
+    Also verifies secondary mode-based control and blank-field artifact warning. Tested using pitch_05.
     """
     p5 = next(p for p in pitches if p["id"] == "pitch_05_blank_network_and_rating")
     assert p5["network"] is None
@@ -184,24 +185,70 @@ def test_what_if_blank_filling_decomposition_and_warning(pitches, explain_artifa
     decomp = res["decomposition"]
     assert decomp is not None
     assert set(decomp["filled_fields"]) == {"network", "content_rating"}
-    assert decomp["typical_values_used"]["network"] == "Naver TV Cast"
-    assert decomp["typical_values_used"]["content_rating"] == "15+"
+    assert "joint distribution" in decomp["marginal_control_distribution"]
+    assert decomp["calibrated_delta_note"] == "step-function values, not measurements"
+    assert decomp["mode_values_used"]["network"] == "Naver TV Cast"
+    assert decomp["mode_values_used"]["content_rating"] == "15+"
 
-    # Check additivity of decomposition
-    typ_cal = decomp["typical_value_control_delta"]["calibrated_p_high_delta"]
-    spec_cal = decomp["specific_choice_delta"]["calibrated_p_high_delta"]
+    # Check raw scale shares and additivity
+    raw_shares = decomp["raw_shares"]
+    assert abs(raw_shares["marginal_control_share_pct"] + raw_shares["specific_choice_share_pct"] - 100.0) < 0.2
+    assert raw_shares["total_share_pct"] == 100.0
+
+    m_raw = decomp["marginal_control_delta"]["raw_p_high_delta"]
+    s_raw = decomp["specific_choice_delta"]["raw_p_high_delta"]
+    tot_raw = res["delta"]["raw_p_high_delta"]
+    assert m_raw == pytest.approx(0.1998, abs=1e-3)
+    assert s_raw == pytest.approx(0.0942, abs=1e-3)
+    assert tot_raw == pytest.approx(0.2940, abs=1e-3)
+    assert raw_shares["marginal_control_share_pct"] == pytest.approx(68.0, abs=1e-3)
+    assert raw_shares["specific_choice_share_pct"] == pytest.approx(32.0, abs=1e-3)
+    assert abs((m_raw + s_raw) - tot_raw) < 1e-4
+
+    # Check additivity of marginal control decomposition
+    m_cal = decomp["marginal_control_delta"]["calibrated_p_high_delta"]
+    s_cal = decomp["specific_choice_delta"]["calibrated_p_high_delta"]
     tot_cal = res["delta"]["calibrated_p_high_delta"]
-    assert abs((typ_cal + spec_cal) - tot_cal) < 1e-4
+    assert abs((m_cal + s_cal) - tot_cal) < 1e-4
+
+    # Check additivity of mode control decomposition
+    mod_cal = decomp["mode_control_delta"]["calibrated_p_high_delta"]
+    mod_spec_cal = decomp["mode_specific_choice_delta"]["calibrated_p_high_delta"]
+    assert abs((mod_cal + mod_spec_cal) - tot_cal) < 1e-4
 
     # Check warning presence
     assert any("part of this change reflects the model's lower P(high) when a field is blank" in w for w in res["warnings"])
+
+
+def test_what_if_band_boundary_warning(pitches, explain_artifacts):
+    """
+    Asserts what_if adds band_boundary_warning when before/after sits within one plateau
+    of a band edge (0.20, 0.50, 0.75) or when the likelihood band changes.
+    """
+    # 1. Band changes and lands on band edge (0.20)
+    p5 = next(p for p in pitches if p["id"] == "pitch_05_blank_network_and_rating")
+    res5 = what_if(p5, {"network": "JTBC", "content_rating": "15+"}, artifacts=explain_artifacts)
+    assert res5["quotable"]["band_changed"]
+    assert res5["band_boundary_warning"] == "band edges are approximate: the calibrator is a step function"
+    assert any("band edges are approximate: the calibrator is a step function" in w for w in res5["warnings"])
+
+    # 2. Band does NOT change, but after-state sits on plateau 0.5333 adjacent to edge 0.50
+    p1 = next(p for p in pitches if p["id"] == "pitch_01_complete_kr_thriller")
+    res1 = what_if(p1, {"genres": ["Drama", "Romance"]}, artifacts=explain_artifacts)
+    assert res1["before"]["likelihood_band"] == "Likely"
+    assert res1["after"]["likelihood_band"] == "Likely"
+    assert not res1["quotable"]["band_changed"]
+    assert res1["after"]["calibrated_p_high"] == pytest.approx(0.5333, abs=1e-3)
+    assert res1["band_boundary_warning"] == "band edges are approximate: the calibrator is a step function"
+    assert any("band edges are approximate: the calibrator is a step function" in w for w in res1["warnings"])
 
 
 def test_unrecognized_network_emits_57_networks_warning(pitches, explain_artifacts):
     """
     Asserts that:
     1. Case- and whitespace-insensitive matching succeeds for known networks without warnings (e.g. 'JTBC' -> 'jTBC').
-    2. Truly unrecognized networks emit a warning citing 57 training networks and close suggestions via difflib.
+    2. Truly unrecognized networks with no close match (difflib cutoff 0.8) emit a warning with NO suggestions.
+    3. Typos with close match (>= 0.8) emit a warning with 'Did you mean:' suggestions.
     """
     # 1. Case- and whitespace-insensitive matching succeeds
     p_jtbc = copy.deepcopy(pitches[0])
@@ -210,16 +257,24 @@ def test_unrecognized_network_emits_57_networks_warning(pitches, explain_artifac
     assert out_jtbc["pitch_summary"]["network"] == "jTBC"
     assert not any("not one of the 57 recognized training networks" in w for w in out_jtbc["warnings"])
 
-    # 2. Truly unrecognized network emits warning with suggestions
+    # 2. Truly unrecognized network (< 0.8 similarity) emits warning with NO suggestions
     p_bad = copy.deepcopy(pitches[0])
     p_bad["network"] = "Acorn TV Streaming"
     out_bad = explain_pitch(p_bad, artifacts=explain_artifacts)
-    assert any("not one of the 57 recognized training networks" in w for w in out_bad["warnings"])
-    assert any("Did you mean:" in w for w in out_bad["warnings"])
+    assert any("not one of the 57 recognized training networks; falls back to 'Other'." in w for w in out_bad["warnings"])
+    assert not any("Did you mean:" in w for w in out_bad["warnings"])
 
-    # Also test what_if lever change
+    # 3. Typo with close match (>= 0.8 similarity) emits warning WITH suggestions
+    p_typo = copy.deepcopy(pitches[0])
+    p_typo["network"] = "jTBC1"
+    out_typo = explain_pitch(p_typo, artifacts=explain_artifacts)
+    assert any("not one of the 57 recognized training networks; falls back to 'Other'." in w for w in out_typo["warnings"])
+    assert any("Did you mean: 'jTBC'?" in w for w in out_typo["warnings"])
+
+    # Also test what_if lever change with no suggestions
     res_wi = what_if(pitches[0], {"network": "HBO Max"}, artifacts=explain_artifacts)
-    assert any("not one of the 57 recognized training networks" in w for w in res_wi["warnings"])
+    assert any("not one of the 57 recognized training networks; falls back to 'Other'." in w for w in res_wi["warnings"])
+    assert not any("Did you mean:" in w for w in res_wi["warnings"])
 
 
 # -----------------------------------------------------------------------------
@@ -302,7 +357,7 @@ def test_injection_control_identical_predictive_outputs(pitches, explain_artifac
 def test_quotable_blocks_present_and_formatted(pitches, explain_artifacts, retriever_artifacts):
     """
     Asserts each tool returns a quotable block:
-    - Never prints 0.00 or 1.00; uses probability_display ('under 5%' / 'over 95%' at bounds).
+    - Retains only likelihood_band and observed_band_rate.
     - Excludes predicted_tier from quotable; keeps predicted_tier in prediction with argmax label.
     - For comparables, defines quotable fields as records (name, year, country, network, tier, url)
       and scoring_note prohibiting presenting similarity as probabilities.
@@ -315,8 +370,8 @@ def test_quotable_blocks_present_and_formatted(pitches, explain_artifacts, retri
     q_exp = exp["quotable"]
     assert q_exp["likelihood_band"] in ["Very likely", "Likely", "Possible", "Unlikely"]
     assert "observed_band_rate" in q_exp
-    assert "probability_display" in q_exp
-    assert q_exp["probability_display"] not in ["0%", "0.00", "0.0", "100%", "1.00", "1.0"]
+    assert "probability_display" not in q_exp
+    assert set(q_exp.keys()) == {"likelihood_band", "observed_band_rate"}
     # predicted_tier must be removed from quotable
     assert "predicted_tier" not in q_exp
     # predicted_tier remains in prediction with argmax note
@@ -329,14 +384,18 @@ def test_quotable_blocks_present_and_formatted(pitches, explain_artifacts, retri
     assert "quotable" in wi
     assert "before" in wi["quotable"]
     assert "after" in wi["quotable"]
-    assert "probability_display" in wi["quotable"]["after"]
-    assert wi["quotable"]["after"]["probability_display"] not in ["0%", "0.00", "0.0", "100%", "1.00", "1.0"]
+    assert set(wi["quotable"]["before"].keys()) == {"likelihood_band", "observed_band_rate"}
+    assert set(wi["quotable"]["after"].keys()) == {"likelihood_band", "observed_band_rate"}
+    assert "probability_display" not in wi["quotable"]["before"]
+    assert "probability_display" not in wi["quotable"]["after"]
+    assert "predicted_tier" not in wi["quotable"]["before"]
     assert "predicted_tier" not in wi["quotable"]["after"]
 
     # find_comparables
     comp = find_comparables(p, k=3, artifacts=retriever_artifacts)
     assert "quotable" in comp
     q_comp = comp["quotable"]
+    assert "probability_display" not in q_comp
     assert "comparables" in q_comp
     assert len(q_comp["comparables"]) == 3
     rec0 = q_comp["comparables"][0]
