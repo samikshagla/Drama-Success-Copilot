@@ -63,4 +63,13 @@ FORBIDDEN_PHRASES = [
     "box office",
     "commercial hit",
     "financial return",
+    "near-certain",
+    "almost certain",
+    "bound to",
+    "can't miss",
+    "sure thing",
+    "no doubt",
+    "will almost certainly",
+    "certain hit",
+    "money-maker",
 ]

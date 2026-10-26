@@ -146,14 +146,81 @@ def format_driver_entry(d: Dict[str, Any], direction: str) -> str:
     reason = d.get("reason", "")
     if group == "country":
         return "`country` (country cohort baseline)"
-    if group.startswith("talent_") and (
-        "unlisted/missing" in reason.lower()
-        or "no qualifying" in reason.lower()
-        or "missing" in reason.lower()
-        or "debut" in reason.lower()
-    ):
-        return f"`{group}` (no track record found in the data for the attached talent)"
     return f"`{group}` ({direction})"
+
+
+def format_executive_alert(w: str) -> str:
+    """
+    Rewrite technical tool warnings into clear, executive-facing alerts:
+    - Removes technical jargon ('encoded as missing', 'NaN', 'feature set to missing').
+    - Preserves all underlying facts (12-month rule, debut vs unlisted, missing field penalty,
+      57 known networks, 6-episode scope cutoff, 150-episode horizon, 2025 horizon).
+    """
+    w_clean = w.strip()
+
+    # 1. Talent prior credits / 12-month rule
+    if "no qualifying prior credits found" in w_clean.lower():
+        return (
+            "No qualifying prior credits found within the 12-month rule. "
+            "The model cannot distinguish a debut creator from an unlisted track record; "
+            "prior reach is treated as unknown."
+        )
+
+    # 2. Blank network
+    if "network is blank" in w_clean.lower():
+        return (
+            "Broadcaster network is not specified. "
+            "The model predicts lower likelihood of the High tier when this field is left blank than when a typical broadcaster is attached; "
+            "specify a network for an accurate assessment."
+        )
+
+    # 3. Blank content rating
+    if "content rating is blank" in w_clean.lower():
+        return (
+            "Content rating is not specified. "
+            "The model predicts lower likelihood of the High tier when this field is left blank than when a typical rating is attached; "
+            "specify a content rating if known."
+        )
+
+    # 4. Blank weekdays
+    if "broadcast weekday schedule is blank" in w_clean.lower():
+        return (
+            "Broadcast weekday schedule is not specified. "
+            "The model predicts lower likelihood of the High tier when this schedule is left blank than when typical broadcast days are attached; "
+            "specify broadcast days if known."
+        )
+
+    # 5. Blank genres
+    if "genres list is blank" in w_clean.lower():
+        return (
+            "Genre combination is not specified. "
+            "The model predicts lower likelihood of the High tier when genres are left blank than when typical genres are attached; "
+            "specify planned genres if known."
+        )
+
+    # 6. Unrecognized network
+    if "is not among the 57 known networks" in w_clean.lower():
+        m = re.search(
+            r"broadcaster\s+'([^']+)'\s+is not among the 57 known networks.*?(?:close matches:\s*([^.]+))?",
+            w_clean,
+            re.IGNORECASE,
+        )
+        if m:
+            net = m.group(1)
+            matches = m.group(2)
+            if matches:
+                return f"Broadcaster '{net}' is not among the 57 known networks in historical data; treated as 'Other'. Closest recognized names: {matches.strip()}."
+            return f"Broadcaster '{net}' is not among the 57 known networks in historical data; treated as 'Other'."
+
+    # 7. Disallowed lever notice (if already formatted)
+    if "disallowed lever" in w_clean.lower():
+        return w_clean
+
+    # Fallback cleaning: strip "(NaN)" and "encoded as missing" if any other warning appears
+    w_clean = re.sub(r"\(NaN\)", "(unknown)", w_clean)
+    w_clean = re.sub(r";\s*encoded as missing", "", w_clean)
+    w_clean = re.sub(r";\s*feature set to missing", "", w_clean)
+    return w_clean
 
 
 def generate_template_memo(
@@ -166,10 +233,11 @@ def generate_template_memo(
     Generate a deterministic, 100% grounded executive decision memorandum.
     Adheres strictly to all governance guidelines:
     - Numbered dynamically to prevent missing section numbers.
+    - Low-information warning when >= 3 metadata fields are missing.
+    - Filter talent groups with NaN reach from drivers and surface track record note.
     - Verbatim observed_band_rate with unified qualification gloss.
-    - Group names and direction only for predictive drivers (no numbers, no percentiles).
-    - Table of comparables with mandatory retrieval pool caveat.
-    - What-if sensitivity analysis in words only with mandatory associational caveat.
+    - Small comparison table for Before / After what-if sensitivity.
+    - Table of comparables with explicit absence explanation and retrieval pool caveat.
     - Zero continuous decimals, zero commercial certainty language, zero talent names.
     """
     exp_out = tool_outputs.get("explain_pitch", {})
@@ -183,26 +251,63 @@ def generate_template_memo(
     lines: List[str] = []
     sec_num = 1
 
+    def is_blank(val: Any) -> bool:
+        if val is None:
+            return True
+        if isinstance(val, (list, tuple)):
+            return len(val) == 0 or all(is_blank(x) for x in val)
+        s = str(val).strip()
+        return s in ["", "Unknown", "Not Yet Rated", "nan", "None", "Unspecified / blank", "None specified"]
+
     # Section 1: What Was Assessed
     country = pitch.get("country", "Unknown")
-    planned_start = pitch.get("planned_start", "Unspecified")
+    planned_start_raw = str(pitch.get("planned_start") or "").strip()
+    if re.fullmatch(r"\d{4}", planned_start_raw):
+        date_phrase = f"planned premiere year: {planned_start_raw}"
+    elif planned_start_raw and planned_start_raw.lower() not in ["unspecified", "none", "unknown", "nan"]:
+        date_phrase = f"premiere on {planned_start_raw}"
+    else:
+        date_phrase = "premiere date not specified"
+
     episodes_raw = pitch.get("episodes", 16)
     try:
         episodes_int = int(round(float(episodes_raw)))
     except (ValueError, TypeError):
         episodes_int = 16
-    network = pitch.get("network") or "Unspecified / blank"
-    rating = pitch.get("content_rating") or "Unspecified / blank"
-    weekdays = ", ".join(pitch.get("weekdays") or []) or "None specified"
-    genres = ", ".join(pitch.get("genres") or []) or "None specified"
+
+    net_val = pitch.get("network")
+    if not is_blank(net_val):
+        net_phrase = f"Broadcaster listed as '{net_val}'"
+    else:
+        net_phrase = "network not specified"
+
+    cr_val = pitch.get("content_rating")
+    if not is_blank(cr_val):
+        cr_phrase = f"content rating '{cr_val}'"
+    else:
+        cr_phrase = "content rating not specified"
+
+    wk_val = pitch.get("weekdays")
+    if not is_blank(wk_val):
+        wk_list = [str(x).strip() for x in wk_val if not is_blank(x)] if isinstance(wk_val, (list, tuple)) else [str(wk_val).strip()]
+        wk_phrase = f"scheduled for broadcast on {', '.join(wk_list)}"
+    else:
+        wk_phrase = "broadcast days not specified"
+
+    g_val = pitch.get("genres")
+    if not is_blank(g_val):
+        g_list = [str(x).strip() for x in g_val if not is_blank(x)] if isinstance(g_val, (list, tuple)) else [str(g_val).strip()]
+        g_phrase = f"planned genres: {', '.join(g_list)}"
+    else:
+        g_phrase = "genres not specified"
 
     lines.append(f"### {sec_num}. What Was Assessed")
     sec_num += 1
     lines.append(
         f"Production assessment for proposed drama originating in {country}. "
-        f"Planned release schedule targets premiere on {planned_start} with {episodes_int} planned episodes "
-        f"scheduled for broadcast on {weekdays}. Broadcaster listed as '{network}', content rating '{rating}', "
-        f"and planned genres: {genres}. Individual creator names and narrative synopsis text are excluded from assessment."
+        f"Planned release schedule targets {date_phrase} with {episodes_int} planned episodes; "
+        f"{wk_phrase}. {net_phrase.capitalize()}, {cr_phrase}, and {g_phrase}. "
+        f"Individual creator names and narrative synopsis text are excluded from assessment."
     )
     lines.append("")
 
@@ -210,8 +315,19 @@ def generate_template_memo(
     band = exp_quotable.get("likelihood_band", "Unknown")
     obs_rate = exp_quotable.get("observed_band_rate", "N/A")
 
+    # Check for low-information pitch (>= 3 of network, content_rating, genres, weekdays blank)
+    blank_metadata_count = sum([
+        is_blank(pitch.get("network")),
+        is_blank(pitch.get("content_rating")),
+        is_blank(pitch.get("genres")),
+        is_blank(pitch.get("weekdays")),
+    ])
+    is_low_info = blank_metadata_count >= 3
+
     lines.append(f"### {sec_num}. Likelihood Band & Historical Track Record")
     sec_num += 1
+    if is_low_info:
+        lines.append("Low-information pitch: this band mostly reflects missing fields, not the concept; fill them in and re-run.")
     lines.append(f"Model-Assigned Likelihood Band: **{band}**")
     lines.append(f"Empirical benchmark: **{obs_rate}** {OBSERVED_RATE_QUALIFIER}")
     lines.append("")
@@ -222,17 +338,53 @@ def generate_template_memo(
     pos_drivers = exp_out.get("top_positive_drivers", [])
     neg_drivers = exp_out.get("top_negative_drivers", [])
 
-    if pos_drivers:
-        pos_names = [format_driver_entry(d, "positive") for d in pos_drivers]
+    # Threshold for material executive drivers (2.0 percentage points of High-tier probability)
+    DRIVER_ATTRIBUTION_THRESHOLD = 0.020
+    EXCLUDED_DRIVER_GROUPS = {"country", "episodes"}
+
+    def is_talent_no_history(d: Dict[str, Any]) -> bool:
+        group = d.get("group", "")
+        reason = d.get("reason", "").lower()
+        return group.startswith("talent_") and (
+            "missing" in reason or "unlisted" in reason or "no qualifying" in reason or "debut" in reason or "unknown" in reason
+        )
+
+    # Filter out excluded baseline groups, sub-threshold drivers, and unlisted talent
+    filtered_pos = [
+        d for d in pos_drivers
+        if d.get("group") not in EXCLUDED_DRIVER_GROUPS
+        and abs(float(d.get("attribution", 0.0))) >= DRIVER_ATTRIBUTION_THRESHOLD
+        and not is_talent_no_history(d)
+    ]
+    filtered_neg = [
+        d for d in neg_drivers
+        if d.get("group") not in EXCLUDED_DRIVER_GROUPS
+        and abs(float(d.get("attribution", 0.0))) >= DRIVER_ATTRIBUTION_THRESHOLD
+        and not is_talent_no_history(d)
+    ]
+
+    # Check if any attached talent had no qualifying history
+    has_attached_talent = bool(pitch.get("directors") or pitch.get("writers") or pitch.get("lead_cast"))
+    has_talent_no_hist = any(is_talent_no_history(d) for d in (pos_drivers + neg_drivers)) or any(
+        "No qualifying prior credits found" in w for w in exp_out.get("warnings", [])
+    )
+
+    if filtered_pos:
+        pos_names = [format_driver_entry(d, "positive") for d in filtered_pos[:3]]
         lines.append(f"- **Top Positive Feature Groups:** {', '.join(pos_names)}.")
     else:
         lines.append("- **Top Positive Feature Groups:** None identified.")
 
-    if neg_drivers:
-        neg_names = [format_driver_entry(d, "negative") for d in neg_drivers]
+    if filtered_neg:
+        neg_names = [format_driver_entry(d, "negative") for d in filtered_neg[:3]]
         lines.append(f"- **Top Negative Feature Groups:** {', '.join(neg_names)}.")
     else:
         lines.append("- **Top Negative Feature Groups:** None identified.")
+
+    lines.append("- Country is a cohort baseline and planned episode count had little influence on this assessment.")
+
+    if has_attached_talent and has_talent_no_hist:
+        lines.append("- Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment")
     lines.append("")
 
     # Section 4: Advisory Warnings & Governance Alerts
@@ -248,8 +400,12 @@ def generate_template_memo(
         # De-duplicate step-function warning if What-If section will present it as Calibration Step Alert
         if has_what_if_section and BAND_BOUNDARY_WARNING in w_norm.lower():
             continue
-        if w_norm not in clean_warnings:
-            clean_warnings.append(w_norm)
+        # Show blank-field warning only in What-If section, not in assessment alerts
+        if "part of this change reflects" in w_norm.lower():
+            continue
+        exec_alert = format_executive_alert(w_norm)
+        if exec_alert not in clean_warnings:
+            clean_warnings.append(exec_alert)
 
     if disallowed_levers:
         dl_str = ", ".join(sorted(disallowed_levers))
@@ -280,7 +436,11 @@ def generate_template_memo(
             url = rec.get("url", "#")
             lines.append(f"| {idx} | {t} | {y} | {c} | {n} | {tier} | {url} |")
     else:
-        lines.append("No historical comparables identified within specified date window.")
+        syn = pitch.get("synopsis_text")
+        if not syn or not str(syn).strip():
+            lines.append("No historical comparables identified: no synopsis text was provided in the pitch.")
+        else:
+            lines.append("No historical comparables identified: no eligible candidate titles found within the maturity date cutoff.")
 
     lines.append(f"\n> [!NOTE]\n> **Retrieval Scope Caveat:** {COMPARABLES_CAVEAT}.")
     lines.append("")
@@ -299,17 +459,22 @@ def generate_template_memo(
             b_rate = wi_quotable["before"]["observed_band_rate"]
             a_band = wi_quotable["after"]["likelihood_band"]
             a_rate = wi_quotable["after"]["observed_band_rate"]
-            summary = wi_quotable.get("delta_band_summary", "")
 
             lines.append(f"- **Attachment Changes Evaluated:** {json.dumps(wi_out.get('changes_applied', {}))}")
-            lines.append(f"- **Simulated Trajectory:** {summary}.")
-            lines.append(f"- **Before Baseline:** Band '{b_band}' ({b_rate}).")
-            lines.append(f"- **After Baseline:** Band '{a_band}' ({a_rate}).")
+            lines.append("")
+            lines.append("| State | Likelihood Band | Empirical Benchmark (Observed Test Rate) |")
+            lines.append("| :--- | :--- | :--- |")
+            lines.append(f"| Before | {b_band} | {b_rate} |")
+            lines.append(f"| After | {a_band} | {a_rate} |")
+            lines.append("")
 
             decomp = wi_out.get("decomposition")
             share_stmt = format_blank_fill_share_statement(decomp)
             if share_stmt:
-                lines.append(f"- **Blank-Field Decomposition:** {share_stmt}")
+                lines.append(
+                    f"- **Blank-Field Effect:** Part of this change reflects the model's lower likelihood of the High tier "
+                    f"when a field is blank; marginal and mode controls decompose this baseline lift. {share_stmt}"
+                )
 
             if wi_out.get("band_boundary_warning"):
                 lines.append(f"- **Calibration Step Alert:** {BAND_BOUNDARY_WARNING}.")

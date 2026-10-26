@@ -66,6 +66,147 @@ def check_synopsis_echo(memo: str, synopsis: Optional[str]) -> List[str]:
     return failures
 
 
+def check_word_percentages_and_ratios(memo: str) -> List[str]:
+    """
+    Detect unapproved percentages or ratio expressions written as words or mixed forms:
+    - Word percentages: 'ninety percent', '91 per cent', 'fifty percent', etc.
+    - Ratio expressions: 'nine in ten', '9 out of 10', '1 in 4', 'two out of ten', etc.
+    """
+    failures = []
+    clean = memo.lower()
+
+    # 1. Word or mixed percentages: e.g. 'ninety percent', '91 per cent', 'fifty-five percent'
+    word_percent_pattern = r"\b(?:[a-z]+(?:-[a-z]+)?|\d+)\s+(?:percent|per\s*cent)\b"
+    for m in re.finditer(word_percent_pattern, clean):
+        match_str = m.group(0).strip()
+        failures.append(f"Forbidden word or mixed percentage format found: '{match_str}'")
+
+    # 2. Ratio expressions: e.g. 'nine in ten', '9 out of 10', '3 in 4', 'one out of five'
+    num_token = r"(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)"
+    ratio_pattern = rf"\b{num_token}\s+(?:in|out\s+of)\s+{num_token}\b"
+    for m in re.finditer(ratio_pattern, clean):
+        match_str = m.group(0).strip()
+        failures.append(f"Forbidden ratio expression found: '{match_str}'")
+
+    return failures
+
+
+def get_allowed_numeric_tokens(tool_outputs: Dict[str, Any], pitch: Dict[str, Any]) -> Set[str]:
+    """Collect all valid numeric tokens from boilerplate, pitch inputs, and tool outputs."""
+    allowed: Set[str] = set()
+
+    # 1. Standard boilerplate constants
+    for s in [BAND_BOUNDARY_WARNING, COMPARABLES_CAVEAT, LIMITATIONS_NOTICE, OBSERVED_RATE_QUALIFIER, WHAT_IF_CAVEAT]:
+        norm = re.sub(r"(\d),(\d)", r"\1\2", s)
+        for tok in re.findall(r"\b\d+(?:\.\d+)?\b", norm):
+            allowed.add(tok)
+            try:
+                allowed.add(str(int(float(tok))))
+            except ValueError:
+                pass
+
+    # Basic layout numbers and governance limits
+    for num in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "16", "2022", "2025", "2525", "95", "5", "50", "13", "15", "18"]:
+        allowed.add(num)
+
+    # 2. Pitch inputs
+    for k, v in pitch.items():
+        norm = re.sub(r"(\d),(\d)", r"\1\2", str(v))
+        for tok in re.findall(r"\b\d+(?:\.\d+)?\b", norm):
+            allowed.add(tok)
+            try:
+                allowed.add(str(int(float(tok))))
+            except ValueError:
+                pass
+
+    # 3. Tool outputs
+    for tool_name, out in tool_outputs.items():
+        if not isinstance(out, dict):
+            continue
+        quotable = out.get("quotable", {})
+        rates: List[str] = []
+        if "observed_band_rate" in quotable:
+            rates.append(str(quotable["observed_band_rate"]))
+        if "before" in quotable and "observed_band_rate" in quotable["before"]:
+            rates.append(str(quotable["before"]["observed_band_rate"]))
+        if "after" in quotable and "observed_band_rate" in quotable["after"]:
+            rates.append(str(quotable["after"]["observed_band_rate"]))
+
+        for r in rates:
+            norm = re.sub(r"(\d),(\d)", r"\1\2", str(r))
+            for tok in re.findall(r"\b\d+(?:\.\d+)?\b", norm):
+                allowed.add(tok)
+                try:
+                    allowed.add(str(int(float(tok))))
+                except ValueError:
+                    pass
+
+        # Comparables table
+        if "comparables" in quotable:
+            for rec in quotable["comparables"]:
+                for rk, rv in rec.items():
+                    if rk == "url":
+                        continue
+                    norm = re.sub(r"(\d),(\d)", r"\1\2", str(rv))
+                    for tok in re.findall(r"\b\d+(?:\.\d+)?\b", norm):
+                        allowed.add(tok)
+                        try:
+                            allowed.add(str(int(float(tok))))
+                        except ValueError:
+                            pass
+
+        # Changes applied
+        if "changes_applied" in out:
+            norm = re.sub(r"(\d),(\d)", r"\1\2", str(out["changes_applied"]))
+            for tok in re.findall(r"\b\d+(?:\.\d+)?\b", norm):
+                allowed.add(tok)
+
+        # Tool warnings
+        for w in out.get("warnings", []):
+            norm = re.sub(r"(\d),(\d)", r"\1\2", str(w))
+            for tok in re.findall(r"\b\d+(?:\.\d+)?\b", norm):
+                allowed.add(tok)
+                try:
+                    allowed.add(str(int(float(tok))))
+                except ValueError:
+                    pass
+
+    return allowed
+
+
+def check_general_numeric_grounding(
+    memo: str,
+    tool_outputs: Dict[str, Any],
+    pitch: Dict[str, Any],
+) -> List[str]:
+    """
+    Assert that every number and year in the memo appears in:
+    - Pitch inputs
+    - Observed band rate strings
+    - Comparable records
+    - Allowlisted boilerplate constants
+    """
+    failures = []
+    allowed = get_allowed_numeric_tokens(tool_outputs, pitch)
+
+    # Strip URLs to avoid parsing URL ids/timestamps as ungrounded numbers
+    clean = re.sub(r"https?://\S+", " ", memo)
+    # Strip commas between digits (e.g. 2,525 -> 2525)
+    clean = re.sub(r"(\d),(\d)", r"\1\2", clean)
+
+    tokens = re.findall(r"\b\d+(?:\.\d+)?\b", clean)
+    for tok in tokens:
+        as_int = None
+        try:
+            as_int = str(int(float(tok)))
+        except ValueError:
+            pass
+        if tok not in allowed and (as_int is None or as_int not in allowed):
+            failures.append(f"Ungrounded number '{tok}' found in memo (not in pitch, tool outputs, or constants)")
+
+    return failures
+
+
 def get_name_variants(name: str) -> List[str]:
     """Generate normalized order and reversed order (Western vs Eastern) variants."""
     tokens = re.sub(r"[-_]", " ", name.strip().lower()).split()
@@ -197,6 +338,9 @@ def verify_memo_grounding(
     # 2. Check 6-word synopsis echo
     failures.extend(check_synopsis_echo(memo, pitch.get("synopsis_text")))
 
+    # 3. Check word percentages and ratio expressions
+    failures.extend(check_word_percentages_and_ratios(memo))
+
     # Extract quotable outputs
     exp_out = tool_outputs.get("explain_pitch", {})
     comp_out = tool_outputs.get("find_comparables", {})
@@ -216,14 +360,17 @@ def verify_memo_grounding(
                 allowed_percentages.add(pct)
                 allowed_decimals.add(pct)
 
-    # 3. Check percentages in memo
+    # 4. Check percentages in memo
     memo_percentages = extract_percentages(memo)
     for pct in memo_percentages:
         if pct not in allowed_percentages:
             failures.append(f"Ungrounded percentage '{pct}%' found in memo (not in observed_band_rate)")
 
-    # 4. Check standalone decimal probabilities
+    # 5. Check standalone decimal probabilities
     failures.extend(check_decimal_probabilities(memo, allowed_decimals))
+
+    # 6. Check general numeric grounding (every number/year must be allowlisted)
+    failures.extend(check_general_numeric_grounding(memo, tool_outputs, pitch))
 
     # Collect allowed years
     allowed_years: Set[int] = {2022, 2025}  # Cohort range 2022-2025 from qualifier

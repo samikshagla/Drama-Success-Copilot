@@ -845,9 +845,9 @@ The greenlight memo generation agent is coordinated through `AgentOrchestrator` 
   ```
   What-if scenario changes are strictly accepted through the structured `changes` dictionary and are **never extracted from free-form user text**, eliminating unvalidated instruction parsing vulnerabilities.
 - **LLMClient Protocol & Providers:**
-  - `LLMClient`: A minimal Python `typing.Protocol` defining `generate_plan(pitch, tool_specs, what_if_changes=None) -> Dict[str, Any]` and `write_memo(tool_outputs, pitch_context, what_if_changes=None) -> str`.
+  - `LLMClient`: A minimal Python `typing.Protocol` defining `generate_plan(pitch, tool_specs, what_if_changes=None) -> List[Dict[str, Any]]` and `write_memo(tool_outputs, pitch_context, what_if_changes=None, disallowed_levers=None) -> str`.
   - `MockLLM`: A deterministic, policy-guided client that generates standard tool invocation plans and synthesizes 6- or 7-section executive greenlight memorandums strictly adhering to the `quotable` block mandate.
-  - `LiveLLM`: A lightweight stub client that checks for an explicit `LLM_PROVIDER` environment variable (e.g., in `.env`). In offline and test environments, `LiveLLM` raises `RuntimeError("LiveLLM disabled...")`, requiring zero external LLM SDK installations.
+  - `LiveLLM`: A lightweight client that checks for an explicit `LLM_PROVIDER` environment variable (e.g., in `.env`). In offline and test environments, `LiveLLM` raises `NotImplementedError` when `LLM_PROVIDER != 'mock'`, requiring zero external LLM SDK installations.
 - **Tool Plan Verification & Defensive Execution:**
   The plan returned by the LLM layer is strictly verified before tool execution:
   1. **Allowlisted Tools:** Each tool call must name one of `explain_pitch`, `find_comparables`, or `what_if`. Any unknown tool name is rejected with a warning.
@@ -862,23 +862,25 @@ The greenlight memo generation agent is coordinated through `AgentOrchestrator` 
 
 #### Grounding Verifier & Guardrails Engine (`src/grounding.py`)
 Before any memo is returned to the user or downstream systems, it passes through `verify_memo_grounding` in `src/grounding.py`. If a draft memo violates any constraint, it is rejected, the violations are logged, and the orchestrator deterministically falls back to a verified template memo:
-1. **Talent Name Leak Prevention:** Scans the memo for individual creator names from the pitch input and from the 12,053 historical creators indexed in `models/talent_lookup.joblib` (multi-word names, normalized for case, punctuation, hyphenation, and reversed Western vs Eastern ordering). **Returned comparable drama titles and URLs are strictly excluded from talent name scanning** to prevent false positives from URL slugs containing romanized Chinese or Korean words (e.g. `he-ping-fang-zhou`).
-2. **Strict Percentage Quoting:** Extracts all percentages in the memo via regex (`r"\b\d+(?:\.\d+)?%"`) and asserts that every single percentage originates verbatim from the tool's `observed_band_rate` string. Any hallucinated or invented percentage is immediately flagged.
-3. **6-Word Synopsis Echo Rule:** Splits the pitch synopsis into sliding 6-word windows. Any draft memo echoing $\ge 6$ consecutive words from the input synopsis is rejected, protecting narrative confidentiality and preventing verbatim prompt repetition.
-4. **Continuous Decimal Prohibition:** Scans for raw continuous probabilities or calibrated step-function decimals (`r"(?<![A-Za-z0-9_])0\.\d+(?![A-Za-z0-9_])"`, e.g. `0.5833`), ensuring only qualitative bands and empirical test rates are cited.
-5. **Forbidden Commercial & Certainty Phrases:** Checks for forbidden language outside mandatory boilerplate spans:
-   - Certainty claims: `"will succeed"`, `"guaranteed"`, `"guarantees"`, `"certain to"`, `"sure to"`, `"surefire"`.
-   - Commercial projections: `"revenue"`, `"box office"`, `"roi"`, `"return on investment"`, `"commercial hit"`, `"profit"`, `"profits"`, `"profitable"`, `"earnings"`.
-6. **Mandatory Caveats & Notices:** Asserts verbatim inclusion of all four required disclosures:
+1. **Talent Name Leak Prevention:** Scans the memo for individual creator names from the pitch input and from the 11,755 unique historical creators indexed in `models/talent_lookup.joblib` (unique union across 1,929 directors, 1,992 screenwriters, and 8,132 cast members; total role-creator entries = 12,053). Multi-word names are normalized for case, punctuation, hyphenation, and reversed Western vs Eastern ordering. **Returned comparable drama titles and URLs are strictly excluded from talent name scanning** to prevent false positives from URL slugs containing romanized Chinese or Korean words (e.g. `he-ping-fang-zhou`).
+2. **Strict Percentage Quoting & Ratio Detection:** Extracts all percentages in the memo via regex (`r"\b\d+(?:\.\d+)?%"`) and asserts that every single percentage originates verbatim from the tool's `observed_band_rate` string. Additionally blocks word-form percentages (e.g. `"ninety percent"`, `"91 per cent"`) and ratio expressions (e.g. `"nine in ten"`, `"9 out of 10"`, `"3 in 4"`, `"one in five"`).
+3. **General Numeric Allowlist Check:** Every number and year in the memo must trace to pitch inputs, observed band rate strings, comparable records, or a small allowlist of boilerplate constants (section numbers, default 16 episodes, cohort bounds 2022-2025, test cohort size 2,525, CI bounds 95%, 5%, 50%, etc.). Any fabricated or ungrounded number is blocked.
+4. **6-Word Synopsis Echo Rule:** Splits the pitch synopsis into sliding 6-word windows. Any draft memo echoing $\ge 6$ consecutive words from the input synopsis is rejected, protecting narrative confidentiality and preventing verbatim prompt repetition.
+5. **Continuous Decimal Prohibition:** Scans for raw continuous probabilities or calibrated step-function decimals (`r"(?<![A-Za-z0-9_])0\.\d+(?![A-Za-z0-9_])"`, e.g. `0.5833`), ensuring only qualitative bands and empirical test rates are cited.
+6. **Forbidden Commercial & Certainty Phrases:** Checks for forbidden language outside mandatory boilerplate spans:
+   - Certainty claims: `"will succeed"`, `"guaranteed"`, `"guarantees"`, `"certain to"`, `"sure to"`, `"surefire"`, `"near-certain"`, `"almost certain"`, `"bound to"`, `"can't miss"`, `"sure thing"`, `"no doubt"`, `"will almost certainly"`, `"certain hit"`.
+   - Commercial projections: `"revenue"`, `"box office"`, `"roi"`, `"return on investment"`, `"commercial hit"`, `"profit"`, `"profits"`, `"profitable"`, `"earnings"`, `"money-maker"`.
+7. **Mandatory Caveats & Notices:** Asserts verbatim inclusion of all four required disclosures:
    - `COMPARABLES_CAVEAT`: *"comparables show similar premises; their tiers are not a probability for this pitch"*
    - `WHAT_IF_CAVEAT`: *"Results are associational, not causal; changing attachments does not guarantee audience reach shifts."* (when what-if is evaluated)
    - `BAND_BOUNDARY_WARNING`: *"band edges are approximate: the calibrator is a step function"* (when applicable)
    - `LIMITATIONS_NOTICE`: *"Forecasts and attributions reflect observational correlations from historical training data, not causal treatment effects, commercial earnings predictions, or performance guarantees. Actual audience reach is subject to script execution, marketing investments, competition, and platform scheduling."*
    - `OBSERVED_RATE_QUALIFIER`: *"among the 2,525 evaluated test dramas (released 2022-2025, 6+ episodes, all four countries) that the model placed in this band. High = the top quarter of MyDramaList watchers among dramas of the same country and release year."*
-7. **Qualitative Driver Reporting:** Executive memos report top positive and negative feature groups by name and qualitative context only:
-   - Baseline cohort: `country (country cohort baseline)`
-   - Talent with unlisted credits: `{group} (no track record found in the data for the attached talent)`
-   - Other features: `{group} (positive)` or `{group} (negative)`, strictly omitting numeric SHAP values or individual creator percentiles.
+8. **Qualitative Driver Reporting & Track Record Notice:** Executive memos report top positive and negative feature groups by name and qualitative context only:
+   - Baseline cohort: `country` (country cohort baseline)
+   - Features: `{group}` (positive) or `{group}` (negative), strictly omitting numeric SHAP values or individual creator percentiles.
+   - When attached talent has no qualifying history in the 12-month window (NaN reach), talent groups (`talent_cast`, `talent_director`, `talent_screenwriter`) are **strictly excluded from positive and negative drivers**, and surfaced with a dedicated notice:
+     `- Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment`
 
 ---
 
@@ -907,8 +909,8 @@ The agent and grounding engine were evaluated across a diverse test suite of 20 
 - **Scope & Limitations of 20/20 Pass:** A 20/20 grounding pass demonstrates that the deterministic template memo stays strictly within its own governance rules. It does not evaluate real-LLM generation or real-world prompt synthesis.
 - **Empirical Evidence for Guardrails:** The ChaosLLM adversarial attack evaluation (Table below) and the 200 random memo corruptions test (100% block rate) constitute the primary empirical evidence for the grounding verifier and execution guardrails.
 - **MockLLM vs. Real LLM Injection Behavior:** MockLLM operates on structured JSON fields and never reads or processes unconstrained free-form text. The prompt injection control test proves that the feature-extraction pipeline treats synopses strictly as data embeddings, but says nothing about how a real generative LLM might react to prompt injection within its context window.
-- **LiveLLM Status:** `LiveLLM` is currently an offline disabled stub that raises `RuntimeError` unless explicitly configured; it is not tested against external endpoints in this evaluation suite. Real-LLM behavior, model hallucination under fluid prompts, and injection through model context are deliberately out of scope and not evaluated.
-- **Keyword & Regex Bypass Limitation:** Keyword and regex blocklists can inherently be bypassed by clever linguistic paraphrase, subtle synonymy, or syntactic evasion; this fundamental limitation of static guardrails is the primary reason why production memos default deterministically to the template generator rather than unconstrained open-ended LLM generations.
+- **LiveLLM Status:** `LiveLLM` is currently an offline disabled client that raises `NotImplementedError` when `LLM_PROVIDER != 'mock'`; it is not tested against external endpoints in this evaluation suite. Real-LLM behavior, model hallucination under fluid prompts, and injection through model context are deliberately out of scope and not evaluated.
+- **Uncovered Generative Risks & Static Blocklist Limitations:** Static keyword and regex guardrails cannot cover arbitrary paraphrase, claims without numbers, or persuasive tone / rhetoric; this fundamental limitation of static guardrails is the primary reason why production memos default deterministically to the template generator rather than unconstrained open-ended LLM generations.
 
 ##### 2. Chaos LLM Adversarial Test Double Verification
 An adversarial test double (`ChaosLLM`) subjected the orchestrator and grounding engine to 14 distinct failure modes. Every single adversarial attempt was successfully blocked:
@@ -933,7 +935,7 @@ An adversarial test double (`ChaosLLM`) subjected the orchestrator and grounding
 ##### 3. Determinism, Injection Control & Robustness Testing
 - **Determinism Across Runs:** Executing the complete agent workflow across repeated runs yields **100% identical outputs** (0 byte difference).
 - **Prompt Injection Control:** Replacing prompt injection instructions in `pitch_11` with neutral synopsis text leaves **predictive sections 100% identical**.
-- **200 Random Memo Corruptions Test:** Applying 200 random mutations (inserting ungrounded percentages, omitting required caveats, altering titles, inserting forbidden commercial/certainty phrases, injecting calibrated probability decimals, or echoing synopsis text) yielded a **100.0% block rate (200/200 blocked)** by the grounding engine.
+- **200 Random Memo Corruptions Test:** Applying 200 random mutations (inserting ungrounded percentages, omitting required caveats, altering titles, inserting forbidden commercial/certainty phrases, injecting calibrated probability decimals, word-form percentages like `"ninety percent"`, ratio expressions like `"9 out of 10"`, ungrounded numbers, or echoing synopsis text) yielded a **100.0% block rate (200/200 blocked)** by the grounding engine.
 
 ---
 
@@ -942,7 +944,7 @@ An adversarial test double (`ChaosLLM`) subjected the orchestrator and grounding
 ##### Memo 1: Standard Evaluation — Fixture 01 (`pitch_01_complete_kr_thriller`)
 ```markdown
 ### 1. What Was Assessed
-Production assessment for proposed drama originating in South Korea. Planned release schedule targets premiere on 2024-03-01 with 16 planned episodes scheduled for broadcast on Friday, Saturday. Broadcaster listed as 'tvN', content rating '15+', and planned genres: Thriller, Mystery, Psychological. Individual creator names and narrative synopsis text are excluded from assessment.
+Production assessment for proposed drama originating in South Korea. Planned release schedule targets premiere on 2024-03-01 with 16 planned episodes; scheduled for broadcast on Friday, Saturday. Broadcaster listed as 'tvn', content rating '15+', and planned genres: Thriller, Mystery, Psychological. Individual creator names and narrative synopsis text are excluded from assessment.
 
 ### 2. Likelihood Band & Historical Track Record
 Model-Assigned Likelihood Band: **Likely**
@@ -950,10 +952,12 @@ Empirical benchmark: **57.8% [95% CI: 52.6%, 62.9%] (N=351; observed on test dra
 
 ### 3. Main Predictive Drivers
 - **Top Positive Feature Groups:** `content_rating` (positive), `network` (positive), `genres` (positive).
-- **Top Negative Feature Groups:** `country` (country cohort baseline), `talent_screenwriter` (no track record found in the data for the attached talent), `talent_director` (no track record found in the data for the attached talent).
+- **Top Negative Feature Groups:** None identified.
+- Country is a cohort baseline and planned episode count had little influence on this assessment.
+- Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment
 
 ### 4. Advisory Warnings & Data Hygiene Alerts
-- *Alert:* No qualifying prior credits found within the 12-month rule; feature set to missing. The model cannot distinguish a debut from an unlisted credit; prior reach is treated as unknown (NaN).
+- *Alert:* No qualifying prior credits found within the 12-month rule. The model cannot distinguish a debut creator from an unlisted track record; prior reach is treated as unknown.
 
 ### 5. Comparable Historical Dramas
 | Rank | Title | Release Year | Country | Broadcaster | Reach Tier | URL |
@@ -972,21 +976,22 @@ Forecasts and attributions reflect observational correlations from historical tr
 ##### Memo 2: What-If Sensitivity Simulation — Fixture 05 (`pitch_05_blank_network_and_rating`)
 ```markdown
 ### 1. What Was Assessed
-Production assessment for proposed drama originating in South Korea. Planned release schedule targets premiere on 2024-05-01 with 12 planned episodes scheduled for broadcast on Wednesday, Thursday. Broadcaster listed as 'Unspecified / blank', content rating 'Unspecified / blank', and planned genres: Crime, Action. Individual creator names and narrative synopsis text are excluded from assessment.
+Production assessment for proposed drama originating in South Korea. Planned release schedule targets premiere on 2024-05-01 with 12 planned episodes; scheduled for broadcast on Wednesday, Thursday. Network not specified, content rating not specified, and planned genres: Crime, Action. Individual creator names and narrative synopsis text are excluded from assessment.
 
 ### 2. Likelihood Band & Historical Track Record
 Model-Assigned Likelihood Band: **Unlikely**
 Empirical benchmark: **7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year)** among the 2,525 evaluated test dramas (released 2022-2025, 6+ episodes, all four countries) that the model placed in this band. High = the top quarter of MyDramaList watchers among dramas of the same country and release year.
 
 ### 3. Main Predictive Drivers
-- **Top Positive Feature Groups:** `talent_cast` (no track record found in the data for the attached talent), `weekdays` (positive).
-- **Top Negative Feature Groups:** `genres` (negative), `network` (negative), `country` (country cohort baseline).
+- **Top Positive Feature Groups:** None identified.
+- **Top Negative Feature Groups:** `genres` (negative), `network` (negative).
+- Country is a cohort baseline and planned episode count had little influence on this assessment.
+- Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment
 
 ### 4. Advisory Warnings & Data Hygiene Alerts
-- *Alert:* Network is blank; encoded as missing. The model predicts lower likelihood of the High tier when this field is blank than when it holds a typical value; fill it in with a typical broadcaster for an accurate forecast.
-- *Alert:* Content rating is blank. The model predicts lower likelihood of the High tier when this field is blank than when it holds a typical value; fill it in if known.
-- *Alert:* No qualifying prior credits found within the 12-month rule; feature set to missing. The model cannot distinguish a debut from an unlisted credit; prior reach is treated as unknown (NaN).
-- *Alert:* part of this change reflects the model's lower likelihood of the High tier when a field is blank; marginal and mode controls decompose this baseline lift.
+- *Alert:* Broadcaster network is not specified. The model predicts lower likelihood of the High tier when this field is left blank than when a typical broadcaster is attached; specify a network for an accurate assessment.
+- *Alert:* Content rating is not specified. The model predicts lower likelihood of the High tier when this field is left blank than when a typical rating is attached; specify a content rating if known.
+- *Alert:* No qualifying prior credits found within the 12-month rule. The model cannot distinguish a debut creator from an unlisted track record; prior reach is treated as unknown.
 
 ### 5. Comparable Historical Dramas
 | Rank | Title | Release Year | Country | Broadcaster | Reach Tier | URL |
@@ -1000,10 +1005,13 @@ Empirical benchmark: **7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dram
 
 ### 6. Sensitivity Simulation (What-If Analysis)
 - **Attachment Changes Evaluated:** {"network": "jTBC", "content_rating": "15+"}
-- **Simulated Trajectory:** Likelihood band moves from 'Unlikely' (7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year)) to 'Possible' (31.7% [95% CI: 27.9%, 35.8%] (N=527; observed on test dramas released 2022-2025, relative to dramas of the same country and year)).
-- **Before Baseline:** Band 'Unlikely' (7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year)).
-- **After Baseline:** Band 'Possible' (31.7% [95% CI: 27.9%, 35.8%] (N=527; observed on test dramas released 2022-2025, relative to dramas of the same country and year)).
-- **Blank-Field Decomposition:** Modifications filled unlisted fields (network, content_rating). About two thirds of the raw gain comes from the fields being filled in rather than specific choices, reflecting the baseline statistical penalty for unlisted metadata in the training corpus.
+
+| State | Likelihood Band | Empirical Benchmark (Observed Test Rate) |
+| :--- | :--- | :--- |
+| Before | Unlikely | 7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year) |
+| After | Possible | 31.7% [95% CI: 27.9%, 35.8%] (N=527; observed on test dramas released 2022-2025, relative to dramas of the same country and year) |
+
+- **Blank-Field Effect:** Part of this change reflects the model's lower likelihood of the High tier when a field is blank; marginal and mode controls decompose this baseline lift. Modifications filled unlisted fields (network, content_rating). About two thirds of the raw gain comes from the fields being filled in rather than specific choices, reflecting the baseline statistical penalty for unlisted metadata in the training corpus.
 - **Calibration Step Alert:** band edges are approximate: the calibrator is a step function.
 
 > [!IMPORTANT]
@@ -1016,9 +1024,9 @@ Forecasts and attributions reflect observational correlations from historical tr
 ---
 
 #### Integration Test Suite (`tests/test_agent.py`)
-All 23 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` in about one to five minutes depending on whether the embedding model is cached):
+All 45 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` in about one to five minutes depending on whether the embedding model is cached):
 1. `test_agent_normal_memo_passes_grounding`: Asserts verified generation of 6-section memo on standard pitch.
-2. `test_agent_what_if_normal_memo_passes_grounding`: Asserts verified generation of 7-section memo with what-if sensitivity section.
+2. `test_agent_what_if_normal_memo_passes_grounding`: Asserts verified generation of 7-section memo with what-if sensitivity table.
 3. `test_agent_determinism_across_runs`: Asserts byte-level determinism across repeated executions.
 4-17. `test_chaos_llm_*` (14 cases across 12 vectors): Asserts that adversarial LLM behavior is systematically blocked by orchestrator plan verification and grounding checks.
 18. `test_agent_injection_control_identical_predictive_sections`: Asserts identical predictive memo output when adversarial prompt injections are neutralized.
@@ -1026,9 +1034,16 @@ All 23 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` 
 20. `test_edge_warnings_episodes_and_start_year`: Asserts edge warnings for episodes < 6, episodes > 150, and planned start > 2025.
 21. `test_dynamic_blank_fill_share_phrasing`: Asserts blank-fill share phrasing adapts dynamically ("most", "about two thirds", "about half", "a minority").
 22. `test_talent_name_variants_blocked`: Asserts talent name detection catches reversed, hyphenated, and all-caps name variants.
-23. `test_random_memo_mutations_200_blocked`: Applies 200 random corruptions asserting 100% block rate.
+23. `test_random_memo_mutations_200_blocked`: Applies 200 random corruptions asserting 100% block rate across all attack classes.
+24-26. `test_talent_driver_filtering_and_track_record_note` (3 fixtures): Asserts talent groups with NaN reach are excluded from drivers and track record note is surfaced.
+27. `test_low_information_pitch_warning_and_phrasing`: Asserts low-information pitch alert and phrasing.
+28. `test_no_comparables_reasons`: Asserts explicit distinction between missing synopsis vs maturity cutoff filtering.
+29. `test_blank_field_warning_location_in_what_if`: Asserts blank-field warning appears only in what-if section.
+30-35. `test_grounding_word_percentages_and_ratios_blocked` (6 variants): Asserts word percentages and ratio expressions are rejected.
+36-44. `test_grounding_new_certainty_phrases_blocked` (9 phrases): Asserts newly extended commercial and certainty phrases are rejected.
+45. `test_grounding_general_numeric_check_blocked`: Asserts ungrounded numbers and years outside pitch and outputs are rejected.
 
-*(Total test suite across all modules: 82 tests passing: 23 in `test_agent.py`, 16 in `test_agent_tools.py`, 34 in `test_explain.py`, 9 in `test_retriever.py`).*
+*(Total test suite across all modules: 104 tests passing: 45 in `test_agent.py`, 16 in `test_agent_tools.py`, 34 in `test_explain.py`, 9 in `test_retriever.py`).*
 
 ---
 
@@ -1111,6 +1126,6 @@ All dataset processing and serialized model artifacts are generated through comm
 - [x] **Milestone 4:** Time-based train/test splitting and baseline predictive modeling.
 - [x] **Milestone 5:** Model interpretability with SHAP.
 - [ ] **Milestone 6:** Similar-drama retriever (retriever built and automatically evaluated; human-judged precision@5 pending).
-- [ ] **Milestone 7:** What-if simulator and LLM agent integration (Part A: Agent tool layer complete; Part B: LLM memo agent pending).
+- [x] **Milestone 7:** What-if simulator and LLM agent integration (Part A: Agent tool layer complete; Part B: Agent orchestrator, grounding verifier, and adversarial evaluation suite complete).
 - [ ] **Milestone 8:** FastAPI, Dockerization, and Hugging Face Spaces deployment.
 

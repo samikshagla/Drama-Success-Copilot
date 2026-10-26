@@ -212,7 +212,9 @@ def test_agent_what_if_normal_memo_passes_grounding(eval_pitches, explain_artifa
     assert "### 6. Sensitivity Simulation (What-If Analysis)" in memo
     assert WHAT_IF_CAVEAT in memo
     assert "two thirds" in memo.lower()
-    assert "Likelihood band moves from 'Unlikely'" in memo
+    assert "| State | Likelihood Band | Empirical Benchmark (Observed Test Rate) |" in memo
+    assert "| Before | Unlikely |" in memo
+    assert "| After | Possible |" in memo
 
 
 def test_agent_determinism_across_runs(eval_pitches, explain_artifacts, retriever_artifacts):
@@ -526,6 +528,9 @@ def test_random_memo_mutations_200_blocked(eval_pitches, explain_artifacts, retr
         "insert_forbidden_phrase",
         "insert_decimal",
         "echo_synopsis",
+        "insert_word_percentage",
+        "insert_ratio",
+        "insert_ungrounded_number",
     ]
 
     passed_mutations: List[str] = []
@@ -547,7 +552,11 @@ def test_random_memo_mutations_200_blocked(eval_pitches, explain_artifacts, retr
         elif mut_type == "swap_title":
             corrupted = corrupted.replace("Partners for Justice Season 2 (2019)", "Fictional Phantom Mystery (2020)")
         elif mut_type == "insert_forbidden_phrase":
-            phrase = rng.choice(["guaranteed", "surefire", "revenue", "roi", "box office", "profit", "earnings"])
+            phrase = rng.choice([
+                "guaranteed", "surefire", "revenue", "roi", "box office", "profit", "earnings",
+                "near-certain", "almost certain", "bound to", "can't miss", "sure thing", "no doubt",
+                "will almost certainly", "certain hit", "money-maker"
+            ])
             corrupted = corrupted.replace("### 1. What Was Assessed\n", f"### 1. What Was Assessed\nThis pitch is {phrase} success.\n")
         elif mut_type == "insert_decimal":
             corrupted = corrupted.replace("Model-Assigned Likelihood Band:", "Model continuous probability 0.5833 indicates:")
@@ -555,6 +564,15 @@ def test_random_memo_mutations_200_blocked(eval_pitches, explain_artifacts, retr
             syn_words = p1.get("synopsis_text", "").split()
             six_words = " ".join(syn_words[:6])
             corrupted = corrupted.replace("### 1. What Was Assessed\n", f"### 1. What Was Assessed\n{six_words}\n")
+        elif mut_type == "insert_word_percentage":
+            word_pct = rng.choice(["ninety percent", "91 per cent", "fifty percent", "twenty-five percent"])
+            corrupted = corrupted.replace("### 1. What Was Assessed\n", f"### 1. What Was Assessed\nAudience reach estimate is {word_pct}.\n")
+        elif mut_type == "insert_ratio":
+            ratio_expr = rng.choice(["nine in ten", "9 out of 10", "3 in 4", "four out of five"])
+            corrupted = corrupted.replace("### 1. What Was Assessed\n", f"### 1. What Was Assessed\nExpected viewership success is {ratio_expr}.\n")
+        elif mut_type == "insert_ungrounded_number":
+            fake_num = rng.choice(["85000", "2011", "99", "123456"])
+            corrupted = corrupted.replace("### 1. What Was Assessed\n", f"### 1. What Was Assessed\nTargeting benchmark rating of {fake_num}.\n")
 
         is_grounded, failures = verify_memo_grounding(corrupted, res["tool_outputs"], p1, talent_lookup=talent_lookup)
         if is_grounded:
@@ -567,3 +585,173 @@ def test_random_memo_mutations_200_blocked(eval_pitches, explain_artifacts, retr
         for pm in passed_mutations:
             print(pm)
     assert len(passed_mutations) == 0, f"{len(passed_mutations)} mutations bypassed grounding checks!"
+
+
+# -----------------------------------------------------------------------------
+# New Governance Tests: Drivers, Low-Info, Comparables Reasons, What-If
+# -----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pitch_id", ["pitch_01_complete_kr_thriller", "pitch_05_blank_network_and_rating", "pitch_14_adversarial_disallowed_lever"])
+def test_talent_driver_filtering_and_track_record_note(eval_pitches, explain_artifacts, retriever_artifacts, pitch_id):
+    """
+    Assert talent groups (talent_cast, talent_director, talent_screenwriter) are NOT listed
+    among positive/negative drivers when attached talent has no qualifying history (NaN reach),
+    assert country and episodes are never listed as drivers, and assert baseline sentence and
+    talent track record note are present. Tested on fixtures 01, 05, and 14.
+    """
+    p = next(x for x in eval_pitches if x["id"] == pitch_id)
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p})
+    memo = res["memo"]
+
+    # Extract drivers section
+    drivers_sec = memo.split("### 3. Main Predictive Drivers")[1].split("### 4.")[0]
+
+    # None of talent groups should appear in positive or negative driver lists
+    assert "`talent_cast`" not in drivers_sec
+    assert "`talent_director`" not in drivers_sec
+    assert "`talent_screenwriter`" not in drivers_sec
+
+    # Country and episodes should NEVER appear as drivers
+    assert "`country`" not in drivers_sec
+    assert "`episodes`" not in drivers_sec
+
+    # Mandatory baseline & episode influence sentence
+    assert "Country is a cohort baseline and planned episode count had little influence on this assessment." in memo
+
+    # Explicit talent track record note must be present
+    expected_note = "Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment"
+    assert expected_note in memo
+
+
+def test_low_information_pitch_warning_and_phrasing(eval_pitches, explain_artifacts, retriever_artifacts):
+    """
+    Assert when >= 3 of network, content_rating, genres, weekdays are blank, memo adds:
+    'Low-information pitch: this band mostly reflects missing fields, not the concept; fill them in and re-run.'
+    Also assert phrasing uses 'planned premiere year: 2024', 'broadcast days not specified', 'network not specified',
+    and plain English alerts with no technical jargon ('encoded as missing', 'NaN').
+    Tested on fixture 08.
+    """
+    p8 = next(x for x in eval_pitches if x["id"] == "pitch_08_blank_everything_except_country_and_start")
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p8})
+    memo = res["memo"]
+
+    # Section 2 low-info notice
+    assert "Low-information pitch: this band mostly reflects missing fields, not the concept; fill them in and re-run." in memo
+
+    # Section 1 phrasing & year-only start format
+    assert "planned premiere year: 2024" in memo
+    assert "broadcast days not specified" in memo
+    assert "network not specified" in memo.lower()
+    assert "content rating not specified" in memo
+    assert "genres not specified" in memo
+
+    # Executive alert phrasing: no technical jargon
+    assert "encoded as missing" not in memo
+    assert "NaN" not in memo
+
+
+def test_no_comparables_reasons(eval_pitches, explain_artifacts, retriever_artifacts):
+    """
+    Assert memo explicitly distinguishes between missing synopsis text vs no candidates found within date cutoff.
+    """
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+
+    # Case A: Pitch with no synopsis text
+    p_no_syn = copy.deepcopy(eval_pitches[0])
+    p_no_syn["synopsis_text"] = ""
+    res_a = orch.run({"pitch": p_no_syn})
+    assert "No historical comparables identified: no synopsis text was provided in the pitch." in res_a["memo"]
+
+    # Case B: Pitch with synopsis text but start date in 2000 (no eligible candidates in maturity window)
+    p_early = copy.deepcopy(eval_pitches[0])
+    p_early["planned_start"] = "2000-01-01"
+    res_b = orch.run({"pitch": p_early})
+    assert "No historical comparables identified: no eligible candidate titles found within the maturity date cutoff." in res_b["memo"]
+
+
+def test_blank_field_warning_location_in_what_if(eval_pitches, explain_artifacts, retriever_artifacts):
+    """
+    Assert the blank-field warning ('part of this change reflects...') appears ONLY in the what-if section,
+    NOT in the general assessment alerts (Section 4).
+    """
+    p5 = next(x for x in eval_pitches if x["id"] == "pitch_05_blank_network_and_rating")
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p5, "changes": {"network": "JTBC", "content_rating": "15+"}})
+    memo = res["memo"]
+
+    # Split into sections
+    sec4 = memo.split("### 4. Advisory Warnings & Data Hygiene Alerts")[1].split("### 5.")[0]
+    sec6 = memo.split("### 6. Sensitivity Simulation (What-If Analysis)")[1].split("### 7.")[0]
+
+    # Warning must NOT be in Section 4
+    assert "part of this change reflects" not in sec4.lower()
+
+    # Warning MUST be in Section 6
+    assert "part of this change reflects" in sec6.lower()
+
+
+@pytest.mark.parametrize("bad_expr", [
+    "ninety percent",
+    "91 per cent",
+    "nine in ten",
+    "9 out of 10",
+    "3 in 4",
+    "one in five",
+])
+def test_grounding_word_percentages_and_ratios_blocked(eval_pitches, explain_artifacts, retriever_artifacts, bad_expr):
+    """Assert word percentages and ratio expressions are rejected by grounding verifier."""
+    p1 = eval_pitches[0]
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p1})
+    base_memo = res["memo"]
+
+    corrupted = base_memo + f"\nProjected benchmark likelihood is {bad_expr}."
+    is_grounded, failures = verify_memo_grounding(corrupted, res["tool_outputs"], p1)
+    assert not is_grounded
+    assert any("forbidden word or mixed percentage" in f.lower() or "forbidden ratio expression" in f.lower() for f in failures)
+
+
+@pytest.mark.parametrize("phrase", [
+    "near-certain",
+    "almost certain",
+    "bound to",
+    "can't miss",
+    "sure thing",
+    "no doubt",
+    "will almost certainly",
+    "certain hit",
+    "money-maker",
+])
+def test_grounding_new_certainty_phrases_blocked(eval_pitches, explain_artifacts, retriever_artifacts, phrase):
+    """Assert all 9 newly extended certainty/commercial phrases are blocked by grounding verifier."""
+    p1 = eval_pitches[0]
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p1})
+    base_memo = res["memo"]
+
+    corrupted = base_memo + f"\nThis production is considered a {phrase} outcome."
+    is_grounded, failures = verify_memo_grounding(corrupted, res["tool_outputs"], p1)
+    assert not is_grounded
+    assert any("forbidden commercial/certainty phrase" in f.lower() for f in failures)
+
+
+def test_grounding_general_numeric_check_blocked(eval_pitches, explain_artifacts, retriever_artifacts):
+    """Assert ungrounded numbers and years outside pitch and outputs are rejected."""
+    p1 = eval_pitches[0]
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p1})
+    base_memo = res["memo"]
+
+    # Inject fabricated numbers
+    corrupted_num = base_memo + "\nEstimated viewer impressions exceed 85000 individuals."
+    is_g1, f1 = verify_memo_grounding(corrupted_num, res["tool_outputs"], p1)
+    assert not is_g1
+    assert any("ungrounded number '85000'" in f.lower() for f in f1)
+
+    # Inject fabricated year
+    corrupted_yr = base_memo + "\nReferencing historical performance patterns from 2011."
+    is_g2, f2 = verify_memo_grounding(corrupted_yr, res["tool_outputs"], p1)
+    assert not is_g2
+    assert any("ungrounded year 2011" in f.lower() or "ungrounded number '2011'" in f.lower() for f in f2)
