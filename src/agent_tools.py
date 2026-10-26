@@ -37,6 +37,11 @@ from src.retriever import (
     load_retriever_artifacts,
     parse_query_start_date,
 )
+from src.shared_constants import (
+    BAND_BOUNDARY_WARNING,
+    COMPARABLES_CAVEAT,
+    WHAT_IF_CAVEAT,
+)
 
 # Allowed lever fields in what_if
 ALLOWED_WHAT_IF_LEVERS = {
@@ -661,7 +666,24 @@ def find_comparables(
     validated = validate_pitch(pitch)
     synopsis = validated.get("synopsis_text")
     if not synopsis or not synopsis.strip():
-        raise ValueError("synopsis_text is required in pitch to find comparable dramas.")
+        empty_output: FindComparablesOutput = {
+            "tool": "find_comparables",
+            "k_requested": int(k),
+            "k_returned": 0,
+            "candidate_pool_size": 0,
+            "planned_start": str(validated["planned_start"]),
+            "maturity_cutoff": "N/A",
+            "country_filter": validated["country"],
+            "comparables": [],
+            "quotable": {
+                "comparables": [],
+                "caveat": COMPARABLES_CAVEAT,
+                "scoring_note": "No synopsis text provided in pitch; textual premise comparables cannot be retrieved.",
+            },
+            "caveat": COMPARABLES_CAVEAT,
+        }
+        json.dumps(empty_output)
+        return empty_output
 
     if artifacts is None:
         artifacts = load_retriever_artifacts()
@@ -706,7 +728,7 @@ def find_comparables(
 
     comparables_quotable: ComparablesQuotable = {
         "comparables": quotable_comparables,
-        "caveat": "comparables show similar premises; their tiers are not a probability for this pitch",
+        "caveat": COMPARABLES_CAVEAT,
         "scoring_note": "Similarity scores measure text premise proximity and must not be presented as probabilities.",
     }
 
@@ -720,7 +742,7 @@ def find_comparables(
         "country_filter": sim_result["country_filter"],
         "comparables": comparables,
         "quotable": comparables_quotable,
-        "caveat": "comparables show similar premises; their tiers are not a probability for this pitch",
+        "caveat": COMPARABLES_CAVEAT,
     }
 
     # Verify JSON serializability
@@ -822,7 +844,7 @@ def what_if(
             "changes_applied": {},
             "quotable": empty_quotable,
             "band_boundary_warning": band_boundary_warning,
-            "caveat": "Results are associational, not causal; changing attachments does not guarantee audience reach shifts.",
+            "caveat": WHAT_IF_CAVEAT,
             "warnings": list(dict.fromkeys(before_warnings)),
         }
         json.dumps(output)
@@ -972,7 +994,7 @@ def what_if(
             "mode_specific_choice_delta": mode_specific_delta,
         }
         combined_warnings.append(
-            "part of this change reflects the model's lower P(high) when a field is blank; "
+            "part of this change reflects the model's lower likelihood of the High tier when a field is blank; "
             "marginal and mode controls decompose this baseline lift."
         )
 
@@ -983,7 +1005,7 @@ def what_if(
         or (before_state["likelihood_band"] != after_state["likelihood_band"])
     )
     band_boundary_warning = (
-        "band edges are approximate: the calibrator is a step function"
+        BAND_BOUNDARY_WARNING
         if band_edge_triggered
         else None
     )
@@ -1019,7 +1041,7 @@ def what_if(
         "changes_applied": applied_changes,
         "quotable": quotable,
         "band_boundary_warning": band_boundary_warning,
-        "caveat": "Results are associational, not causal; changing attachments does not guarantee audience reach shifts.",
+        "caveat": WHAT_IF_CAVEAT,
         "warnings": list(dict.fromkeys(combined_warnings)),
     }
 

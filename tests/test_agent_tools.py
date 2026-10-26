@@ -217,7 +217,7 @@ def test_what_if_blank_filling_decomposition_and_warning(pitches, explain_artifa
     assert abs((mod_cal + mod_spec_cal) - tot_cal) < 1e-4
 
     # Check warning presence
-    assert any("part of this change reflects the model's lower P(high) when a field is blank" in w for w in res["warnings"])
+    assert any("part of this change reflects the model's lower likelihood of the High tier when a field is blank" in w for w in res["warnings"])
 
 
 def test_what_if_band_boundary_warning(pitches, explain_artifacts):

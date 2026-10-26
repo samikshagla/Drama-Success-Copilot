@@ -193,13 +193,19 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
     warnings: List[str] = []
 
     # 1. Planned start date & 12-month rule cutoff
-    raw_date = inputs.get("planned_start_date")
+    raw_date = inputs.get("planned_start_date") or inputs.get("planned_start")
     if raw_date is not None and not pd.isna(raw_date):
         planned_dt = pd.to_datetime(raw_date)
     else:
         year = inputs.get("release_year") or inputs.get("year") or 2024
         planned_dt = pd.to_datetime(f"{year}-01-01")
     cutoff_dt = planned_dt - pd.Timedelta(days=365)
+
+    if planned_dt.year > 2025:
+        warnings.append(
+            f"Planned premiere year ({planned_dt.year}) is after the 2025 training/evaluation horizon; "
+            "market dynamics and audience reach baselines may have shifted."
+        )
 
     row: Dict[str, Any] = {}
 
@@ -212,7 +218,17 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
     else:
         ep_val = float(ep)
         row["episodes"] = ep_val
-        if ep_val < ep_min or ep_val > ep_max:
+        if ep_val < 6:
+            warnings.append(
+                f"Planned episode count ({int(ep_val)}) is below the 6-episode scope cutoff used for training; "
+                "predictions may be less reliable."
+            )
+        elif ep_val > 150:
+            warnings.append(
+                f"Planned episode count ({int(ep_val)}) is far above the typical training distribution (<= 150 episodes); "
+                "extreme episode counts may distort model forecasts."
+            )
+        elif ep_val < ep_min or ep_val > ep_max:
             warnings.append(
                 f"Episode count ({int(ep_val)}) is outside the training range ({ep_min}-{ep_max}); predictions may be less reliable."
             )
@@ -228,7 +244,7 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
     net_raw = inputs.get("network") or inputs.get("original_network")
     if net_raw is None or pd.isna(net_raw) or str(net_raw).strip() in ["", "Unknown"]:
         row["original_network"] = np.nan
-        warnings.append("Network is blank; encoded as missing. The model predicts lower P(High) when this field is blank than when it holds a typical value; fill it in with a typical broadcaster for an accurate forecast.")
+        warnings.append("Network is blank; encoded as missing. The model predicts lower likelihood of the High tier when this field is blank than when it holds a typical value; fill it in with a typical broadcaster for an accurate forecast.")
     else:
         net_str = str(net_raw).strip()
         if net_str in meta["valid_networks"]:
@@ -240,7 +256,7 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
     cr_raw = inputs.get("content_rating")
     if cr_raw is None or pd.isna(cr_raw) or str(cr_raw).strip() in ["", "Unknown", "Not Yet Rated"]:
         row["content_rating"] = np.nan
-        warnings.append("Content rating is blank. The model predicts lower P(High) when this field is blank than when it holds a typical value; fill it in if known.")
+        warnings.append("Content rating is blank. The model predicts lower likelihood of the High tier when this field is blank than when it holds a typical value; fill it in if known.")
     else:
         cr_str = str(cr_raw).strip()
         mapped_cr = meta["rating_map"].get(cr_str, cr_str)
@@ -263,7 +279,7 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
     ):
         for w in meta["weekdays"]:
             row[f"aired_on_{w.lower()}"] = np.nan
-        warnings.append("Broadcast weekday schedule is blank or empty. The model predicts lower P(High) when this field is blank than when it holds a typical value; fill it in.")
+        warnings.append("Broadcast weekday schedule is blank or empty. The model predicts lower likelihood of the High tier when this field is blank than when it holds a typical value; fill it in.")
     else:
         if isinstance(wk_raw, str):
             wk_list = [d.strip() for d in wk_raw.split(",")]
@@ -286,7 +302,7 @@ def build_feature_row(inputs: Dict[str, Any], artifacts: Dict[str, Any]) -> Tupl
         for g in meta["valid_genres"]:
             col_g = "genre_" + g.lower().replace("-", "_").replace(" ", "_")
             row[col_g] = np.nan
-        warnings.append("Genres list is blank or empty. The model predicts lower P(High) when this field is blank than when it holds a typical value; fill it in.")
+        warnings.append("Genres list is blank or empty. The model predicts lower likelihood of the High tier when this field is blank than when it holds a typical value; fill it in.")
     else:
         if isinstance(g_raw, str):
             g_list = [item.strip() for item in g_raw.replace("|", ",").split(",")]
