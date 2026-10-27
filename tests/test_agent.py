@@ -641,7 +641,7 @@ def test_low_information_pitch_warning_and_phrasing(eval_pitches, explain_artifa
     assert "Low-information pitch: this band mostly reflects missing fields, not the concept; fill them in and re-run." in memo
 
     # Section 1 phrasing & year-only start format
-    assert "planned premiere year: 2024" in memo
+    assert "Planned premiere year: 2024" in memo
     assert "broadcast days not specified" in memo
     assert "network not specified" in memo.lower()
     assert "content rating not specified" in memo
@@ -755,3 +755,118 @@ def test_grounding_general_numeric_check_blocked(eval_pitches, explain_artifacts
     is_g2, f2 = verify_memo_grounding(corrupted_yr, res["tool_outputs"], p1)
     assert not is_g2
     assert any("ungrounded year 2011" in f.lower() or "ungrounded number '2011'" in f.lower() for f in f2)
+
+
+# -----------------------------------------------------------------------------
+# Golden Memo and Display Consistency Tests
+# -----------------------------------------------------------------------------
+
+def test_golden_memos_regression(eval_pitches, explain_artifacts, retriever_artifacts):
+    """Assert all 5 golden memos match byte-for-byte with freshly generated orchestrator output."""
+    from scripts.print_memos import CONFIGS, GOLDEN_DIR
+    pitch_map = {p["id"]: p for p in eval_pitches}
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+
+    for cfg in CONFIGS:
+        pid = cfg["id"]
+        fname = cfg["file_name"]
+        changes = cfg["changes"]
+        pitch = pitch_map[pid]
+
+        req = {"pitch": pitch}
+        if changes:
+            req["changes"] = changes
+
+        res = orch.run(req)
+        golden_file = GOLDEN_DIR / fname
+        assert golden_file.exists(), f"Golden file {golden_file} does not exist"
+        with open(golden_file, "r", encoding="utf-8") as f:
+            expected = f.read()
+
+        assert res["memo"] == expected, f"Golden memo mismatch for {fname}"
+
+
+def test_pitch_14_unsupported_lever_in_sections_4_and_6(eval_pitches, explain_artifacts, retriever_artifacts):
+    """Confirm unsupported-lever notice for pitch_14 is present in both Section 4 and Section 6."""
+    p14 = next(p for p in eval_pitches if p["id"] == "pitch_14_adversarial_disallowed_lever")
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p14, "changes": {"episodes": 100}})
+    memo = res["memo"]
+
+    # Verify presence in Section 4 (Advisory Warnings)
+    sec4_text = memo.split("### 4. Advisory Warnings & Data Hygiene Alerts")[1].split("### 5.")[0]
+    assert "disallowed lever(s) 'episodes' is not supported" in sec4_text
+
+    # Verify presence in Section 6 (Sensitivity Simulation)
+    sec6_text = memo.split("### 6. Sensitivity Simulation (What-If Analysis)")[1].split("### 7.")[0]
+    assert "modification to 'episodes' is not supported" in sec6_text
+
+
+def test_canonical_network_display_names(eval_pitches, explain_artifacts, retriever_artifacts):
+    """Assert canonical network casing (tvN, Tencent Video, jTBC), never lowercase matching keys."""
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+
+    # 1. tvN
+    p_tvn = copy.deepcopy(eval_pitches[0])
+    p_tvn["network"] = "tvn"
+    res_tvn = orch.run({"pitch": p_tvn})
+    assert "Broadcaster listed as 'tvN'" in res_tvn["memo"]
+    assert "'tvn'" not in res_tvn["memo"]
+
+    # 2. Tencent Video
+    p_tencent = copy.deepcopy(next(p for p in eval_pitches if p["id"] == "pitch_02_complete_cn_historical"))
+    p_tencent["network"] = "tencent video"
+    res_tencent = orch.run({"pitch": p_tencent})
+    assert "Broadcaster listed as 'Tencent Video'" in res_tencent["memo"]
+    assert "'tencent video'" not in res_tencent["memo"]
+
+    # 3. jTBC
+    p_jtbc = copy.deepcopy(eval_pitches[0])
+    p_jtbc["network"] = "jtbc"
+    res_jtbc = orch.run({"pitch": p_jtbc})
+    assert "Broadcaster listed as 'jTBC'" in res_jtbc["memo"]
+    assert "'jtbc'" not in res_jtbc["memo"]
+
+
+def test_pitch_16_episodes_null_warning_and_wording(eval_pitches, explain_artifacts, retriever_artifacts):
+    """Assert tool warning and memo wording when episodes is null."""
+    p16 = next(p for p in eval_pitches if p["id"] == "pitch_16_all_blank_optional_cn")
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res = orch.run({"pitch": p16})
+
+    # Tool warning check
+    exp_warnings = res["tool_outputs"]["explain_pitch"]["warnings"]
+    assert any("Planned episode count is not specified; defaulted to typical length of 16 episodes." in w for w in exp_warnings)
+
+    # Memo text check
+    memo = res["memo"]
+    assert "planned episode count not specified (the assessment assumed the typical length of 16 episodes)" in memo
+    assert "with 16 planned episodes" not in memo
+
+
+def test_fabricated_16_and_12_blocked_when_ungrounded(eval_pitches, explain_artifacts, retriever_artifacts):
+    """Assert fabricated '16' or '12' in a memo is blocked by grounding when not grounded."""
+    p14 = next(p for p in eval_pitches if p["id"] == "pitch_14_adversarial_disallowed_lever")
+    orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
+    res14 = orch.run({"pitch": p14})
+    memo14 = res14["memo"]
+
+    # Fabricate 16 into memo14 (16 is neither in pitch_14 nor in tool outputs for pitch_14)
+    corrupted_16 = memo14 + "\nSeries commitment is set to 16 broadcast segments."
+    is_g16, fails_16 = verify_memo_grounding(corrupted_16, res14["tool_outputs"], p14)
+    assert not is_g16
+    assert any("ungrounded number '16'" in f.lower() for f in fails_16)
+
+    # For 12: create a pitch where talent has NO 12-month warning and episodes != 12, month != 12
+    p_no12 = copy.deepcopy(p14)
+    p_no12["directors"] = []
+    p_no12["writers"] = []
+    p_no12["lead_cast"] = []
+    res_no12 = orch.run({"pitch": p_no12})
+    memo_no12 = res_no12["memo"]
+
+    # Fabricate 12 into memo
+    corrupted_12 = memo_no12 + "\nDevelopment window spans 12 calendar weeks."
+    is_g12, fails_12 = verify_memo_grounding(corrupted_12, res_no12["tool_outputs"], p_no12)
+    assert not is_g12
+    assert any("ungrounded number '12'" in f.lower() for f in fails_12)

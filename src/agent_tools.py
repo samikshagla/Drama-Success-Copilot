@@ -488,13 +488,18 @@ def validate_pitch(pitch: PitchInput) -> Dict[str, Any]:
     content_rating = sanitize_string(cr_raw, max_len=30) if cr_raw else None
 
     # Episodes
-    ep_raw = pitch.get("episodes", 16)
-    try:
-        episodes = float(ep_raw)
-        if episodes <= 0 or np.isnan(episodes):
-            episodes = 16.0
-    except (ValueError, TypeError):
-        episodes = 16.0
+    ep_raw = pitch.get("episodes")
+    if ep_raw is None or (isinstance(ep_raw, str) and not ep_raw.strip()):
+        episodes = None
+    else:
+        try:
+            ep_val = float(ep_raw)
+            if ep_val <= 0 or np.isnan(ep_val):
+                episodes = None
+            else:
+                episodes = ep_val
+        except (ValueError, TypeError):
+            episodes = None
 
     # Genres, Weekdays, Talent
     genres = sanitize_string_list(pitch.get("genres"), max_items=20, max_item_len=50)
@@ -584,13 +589,22 @@ def explain_pitch(
     valid_networks = meta.get("valid_networks", [])
     matched_network, net_warning = match_network(validated.get("network"), valid_networks)
 
+    # Check if episode count was omitted / defaulted
+    ep_val = validated.get("episodes")
+    ep_warning = None
+    if ep_val is None:
+        ep_warning = "Planned episode count is not specified; defaulted to typical length of 16 episodes."
+        model_episodes = 16.0
+    else:
+        model_episodes = ep_val
+
     inputs = {
         "country": validated["country"],
         "network": matched_network,
         "genres": validated["genres"],
         "content_rating": validated["content_rating"],
         "weekdays": validated["weekdays"],
-        "episodes": validated["episodes"],
+        "episodes": model_episodes,
         "directors": validated["directors"],
         "writers": validated["writers"],
         "lead_cast": validated["lead_cast"],
@@ -626,6 +640,8 @@ def explain_pitch(
     raw_warnings = list(raw_explain.get("warnings", []))
     if net_warning:
         raw_warnings.append(net_warning)
+    if ep_warning:
+        raw_warnings.append(ep_warning)
 
     quotable: QuotableBlock = {
         "likelihood_band": raw_explain["likelihood_band"],

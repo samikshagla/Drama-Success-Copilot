@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 from src.agent_tools import (
     ALLOWED_WHAT_IF_LEVERS,
+    COUNTRY_TRAIN_DISTRIBUTIONS,
     explain_pitch,
     find_comparables,
     load_explain_artifacts,
@@ -40,6 +41,12 @@ from src.shared_constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Canonical network capitalization mapping across 57 recognized training networks
+CANONICAL_NETWORKS_MAP: Dict[str, str] = {}
+for _c, _dist in COUNTRY_TRAIN_DISTRIBUTIONS.items():
+    for _n in _dist.get("networks", {}).keys():
+        CANONICAL_NETWORKS_MAP[_n.lower()] = _n
 
 
 # -----------------------------------------------------------------------------
@@ -212,7 +219,11 @@ def format_executive_alert(w: str) -> str:
                 return f"Broadcaster '{net}' is not among the 57 known networks in historical data; treated as 'Other'. Closest recognized names: {matches.strip()}."
             return f"Broadcaster '{net}' is not among the 57 known networks in historical data; treated as 'Other'."
 
-    # 7. Disallowed lever notice (if already formatted)
+    # 7. Planned episode count omitted / defaulted
+    if "episode count is not specified" in w_clean.lower() or "planned episode count is not specified" in w_clean.lower():
+        return "Planned episode count is not specified; defaulted to typical length of 16 episodes for assessment."
+
+    # 8. Disallowed lever notice (if already formatted)
     if "disallowed lever" in w_clean.lower():
         return w_clean
 
@@ -262,24 +273,43 @@ def generate_template_memo(
     # Section 1: What Was Assessed
     country = pitch.get("country", "Unknown")
     planned_start_raw = str(pitch.get("planned_start") or "").strip()
-    if re.fullmatch(r"\d{4}", planned_start_raw):
-        date_phrase = f"planned premiere year: {planned_start_raw}"
+    is_year_only = bool(re.fullmatch(r"\d{4}", planned_start_raw))
+    is_ep_blank = pitch.get("episodes") is None or is_blank(pitch.get("episodes"))
+
+    if is_ep_blank:
+        ep_phrase = "planned episode count not specified (the assessment assumed the typical length of 16 episodes)"
+    else:
+        try:
+            episodes_int = int(round(float(pitch.get("episodes"))))
+            ep_phrase = f"{episodes_int} planned episodes"
+        except (ValueError, TypeError):
+            ep_phrase = "planned episode count not specified (the assessment assumed the typical length of 16 episodes)"
+
+    if is_year_only:
+        schedule_part = f"Planned premiere year: {planned_start_raw}"
+        if is_ep_blank:
+            sched_ep_part = f"{schedule_part}; {ep_phrase}"
+        else:
+            sched_ep_part = f"{schedule_part} with {ep_phrase}"
     elif planned_start_raw and planned_start_raw.lower() not in ["unspecified", "none", "unknown", "nan"]:
-        date_phrase = f"premiere on {planned_start_raw}"
+        schedule_part = f"Planned release schedule targets premiere on {planned_start_raw}"
+        if is_ep_blank:
+            sched_ep_part = f"{schedule_part}; {ep_phrase}"
+        else:
+            sched_ep_part = f"{schedule_part} with {ep_phrase}"
     else:
-        date_phrase = "premiere date not specified"
+        schedule_part = "Planned premiere date not specified"
+        sched_ep_part = f"{schedule_part}; {ep_phrase}"
 
-    episodes_raw = pitch.get("episodes", 16)
-    try:
-        episodes_int = int(round(float(episodes_raw)))
-    except (ValueError, TypeError):
-        episodes_int = 16
-
-    net_val = pitch.get("network")
-    if not is_blank(net_val):
-        net_phrase = f"Broadcaster listed as '{net_val}'"
+    canonical_network = exp_out.get("pitch_summary", {}).get("network")
+    if is_blank(canonical_network):
+        canonical_network = pitch.get("network")
+    if not is_blank(canonical_network):
+        c_str = str(canonical_network).strip()
+        canonical_name = CANONICAL_NETWORKS_MAP.get(c_str.lower(), c_str)
+        net_phrase = f"Broadcaster listed as '{canonical_name}'"
     else:
-        net_phrase = "network not specified"
+        net_phrase = "Network not specified"
 
     cr_val = pitch.get("content_rating")
     if not is_blank(cr_val):
@@ -305,8 +335,7 @@ def generate_template_memo(
     sec_num += 1
     lines.append(
         f"Production assessment for proposed drama originating in {country}. "
-        f"Planned release schedule targets {date_phrase} with {episodes_int} planned episodes; "
-        f"{wk_phrase}. {net_phrase.capitalize()}, {cr_phrase}, and {g_phrase}. "
+        f"{sched_ep_part}; {wk_phrase}. {net_phrase}, {cr_phrase}, and {g_phrase}. "
         f"Individual creator names and narrative synopsis text are excluded from assessment."
     )
     lines.append("")

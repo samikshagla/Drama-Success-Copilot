@@ -1024,7 +1024,7 @@ Forecasts and attributions reflect observational correlations from historical tr
 ---
 
 #### Integration Test Suite (`tests/test_agent.py`)
-All 45 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` in about one to five minutes depending on whether the embedding model is cached):
+All 50 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` in about one to five minutes depending on whether the embedding model is cached):
 1. `test_agent_normal_memo_passes_grounding`: Asserts verified generation of 6-section memo on standard pitch.
 2. `test_agent_what_if_normal_memo_passes_grounding`: Asserts verified generation of 7-section memo with what-if sensitivity table.
 3. `test_agent_determinism_across_runs`: Asserts byte-level determinism across repeated executions.
@@ -1042,8 +1042,13 @@ All 45 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` 
 30-35. `test_grounding_word_percentages_and_ratios_blocked` (6 variants): Asserts word percentages and ratio expressions are rejected.
 36-44. `test_grounding_new_certainty_phrases_blocked` (9 phrases): Asserts newly extended commercial and certainty phrases are rejected.
 45. `test_grounding_general_numeric_check_blocked`: Asserts ungrounded numbers and years outside pitch and outputs are rejected.
+46. `test_golden_memos_regression`: Asserts all 5 golden reference memos match byte-for-byte with freshly generated orchestrator output.
+47. `test_pitch_14_unsupported_lever_in_sections_4_and_6`: Asserts unsupported-lever notice for pitch 14 is present in both Section 4 and Section 6.
+48. `test_canonical_network_display_names`: Asserts canonical network display casing (`tvN`, `Tencent Video`, `jTBC`), never lowercase matching keys.
+49. `test_pitch_16_episodes_null_warning_and_wording`: Asserts tool warning and memo wording when episodes is null.
+50. `test_fabricated_16_and_12_blocked_when_ungrounded`: Asserts fabricated "16" or "12" in a memo is blocked by grounding when not grounded.
 
-*(Total test suite across all modules: 104 tests passing: 45 in `test_agent.py`, 16 in `test_agent_tools.py`, 34 in `test_explain.py`, 9 in `test_retriever.py`).*
+*(Total test suite across all modules: 109 tests passing: 50 in `test_agent.py`, 16 in `test_agent_tools.py`, 34 in `test_explain.py`, 9 in `test_retriever.py`).*
 
 ---
 
@@ -1110,8 +1115,8 @@ All dataset processing and serialized model artifacts are generated through comm
 
 > [!IMPORTANT]
 > **Fresh-Clone Test Behavior & Artifact Guard:**
-> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 59 tests with clear skip indicators.
-> If `data/processed/` tables and models have been produced locally, executing `python src/build_artifacts.py` and `python src/build_retriever.py` regenerates all required artifacts. Running `pytest tests/ -v` then executes and passes all 59 unit and integration tests cleanly in about one to five minutes depending on whether the embedding model is cached (34 in `tests/test_explain.py`, 9 in `tests/test_retriever.py`, and 16 in `tests/test_agent_tools.py`).
+> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 109 tests with clear skip indicators.
+> If `data/processed/` tables and models have been produced locally, executing `python src/build_artifacts.py` and `python src/build_retriever.py` regenerates all required artifacts. Running `pytest tests/ -v` then executes and passes all 109 unit and integration tests cleanly in about one to five minutes depending on whether the embedding model is cached (50 in `tests/test_agent.py`, 34 in `tests/test_explain.py`, 16 in `tests/test_agent_tools.py`, and 9 in `tests/test_retriever.py`).
 
 
 

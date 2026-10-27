@@ -105,9 +105,9 @@ def get_allowed_numeric_tokens(tool_outputs: Dict[str, Any], pitch: Dict[str, An
             except ValueError:
                 pass
 
-    # Basic layout numbers and governance limits
-    for num in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "16", "2022", "2025", "2525", "95", "5", "50", "13", "15", "18"]:
-        allowed.add(num)
+    # Section numbers from markdown memo headings (### 1. through ### 7.)
+    for sec_num in ["1", "2", "3", "4", "5", "6", "7"]:
+        allowed.add(sec_num)
 
     # 2. Pitch inputs
     for k, v in pitch.items():
