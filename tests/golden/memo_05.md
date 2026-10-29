@@ -27,14 +27,14 @@ Empirical benchmark: **7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dram
 > **Retrieval Scope Caveat:** comparables show similar premises; their tiers are not a probability for this pitch.
 
 ### 6. Sensitivity Simulation (What-If Analysis)
-- **Attachment Changes Evaluated:** {"network": "jTBC", "content_rating": "15+"}
+- **Attachment Changes Evaluated:** Network: jTBC; Content rating: 15+
 
 | State | Likelihood Band | Empirical Benchmark (Observed Test Rate) |
 | :--- | :--- | :--- |
 | Before | Unlikely | 7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year) |
 | After | Possible | 31.7% [95% CI: 27.9%, 35.8%] (N=527; observed on test dramas released 2022-2025, relative to dramas of the same country and year) |
 
-- **Blank-Field Effect:** Part of this change reflects the model's lower likelihood of the High tier when a field is blank; marginal and mode controls decompose this baseline lift. Modifications filled unlisted fields (network, content_rating). About two thirds of the raw gain comes from the fields being filled in rather than specific choices, reflecting the baseline statistical penalty for unlisted metadata in the training corpus.
+- **Blank-Field Effect:** Part of this change reflects the model's lower likelihood of the High tier when a field is blank; most of the lift comes from filling in the blank fields, not from the specific choices. Modifications filled unlisted fields (network, content_rating). About two thirds of the raw gain comes from the fields being filled in rather than specific choices, reflecting the baseline statistical penalty for unlisted metadata in the training corpus.
 - **Calibration Step Alert:** band edges are approximate: the calibrator is a step function.
 
 > [!IMPORTANT]

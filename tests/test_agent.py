@@ -762,8 +762,12 @@ def test_grounding_general_numeric_check_blocked(eval_pitches, explain_artifacts
 # -----------------------------------------------------------------------------
 
 def test_golden_memos_regression(eval_pitches, explain_artifacts, retriever_artifacts):
-    """Assert all 5 golden memos match byte-for-byte with freshly generated orchestrator output."""
+    """Assert all 20 golden memos match byte-for-byte with freshly generated orchestrator output."""
     from scripts.print_memos import CONFIGS, GOLDEN_DIR
+    assert len(CONFIGS) == 20, f"Expected 20 configurations, got {len(CONFIGS)}"
+    golden_files = list(GOLDEN_DIR.glob("memo_*.md"))
+    assert len(golden_files) == 20, f"Expected 20 golden files, found {len(golden_files)}"
+
     pitch_map = {p["id"]: p for p in eval_pitches}
     orch = AgentOrchestrator(MockLLM(), explain_artifacts, retriever_artifacts)
 
@@ -784,6 +788,40 @@ def test_golden_memos_regression(eval_pitches, explain_artifacts, retriever_arti
             expected = f.read()
 
         assert res["memo"] == expected, f"Golden memo mismatch for {fname}"
+
+
+def test_readme_memo_excerpts_match_golden():
+    """Assert that the README links to golden memos and docs/agent_eval.md, and contains no drifted memo excerpts."""
+    from scripts.print_memos import GOLDEN_DIR, REPO_ROOT
+    readme_path = REPO_ROOT / "README.md"
+    assert readme_path.exists(), "README.md not found"
+    readme_text = readme_path.read_text(encoding="utf-8")
+
+    # 1. Assert required documentation links
+    assert "tests/golden/memo_01.md" in readme_text, "Link to memo_01.md missing in README"
+    assert "tests/golden/memo_05.md" in readme_text, "Link to memo_05.md missing in README"
+    assert "docs/agent_eval.md" in readme_text, "Link to docs/agent_eval.md missing in README"
+
+    # 2. Assert no full memo is pasted in README
+    assert "```markdown\n### 1. What Was Assessed" not in readme_text, "Pasted memo block found in README"
+
+    # 3. Load all 20 golden memos
+    golden_files = sorted(GOLDEN_DIR.glob("memo_*.md"))
+    assert len(golden_files) == 20
+    golden_memos = [gf.read_text(encoding="utf-8") for gf in golden_files]
+
+    # 4. Check that any sentence or bullet point in README that looks like memo text matches a golden file exactly
+    memo_signature_prefixes = [
+        "- **Attachment Changes Evaluated:**",
+        "- **Blank-Field Effect:**",
+        "Model-Assigned Likelihood Band:",
+    ]
+    for prefix in memo_signature_prefixes:
+        for line in readme_text.splitlines():
+            if line.strip().startswith(prefix):
+                assert any(line.strip() in gm for gm in golden_memos), (
+                    f"Drifted memo excerpt found in README: {line.strip()}"
+                )
 
 
 def test_pitch_14_unsupported_lever_in_sections_4_and_6(eval_pitches, explain_artifacts, retriever_artifacts):

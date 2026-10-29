@@ -906,125 +906,34 @@ The agent and grounding engine were evaluated across a diverse test suite of 20 
 
 ##### 1. Grounding Pass Rate & Evaluator Scope Disclosures
 - **Pass Rate:** **20 / 20 (100.0%)** across all evaluation pitches.
+- **Detailed Evaluation Report:** Complete per-fixture runtime diagnostics, likelihood bands, warning counts, comparables status, and test double logs are recorded in [docs/agent_eval.md](docs/agent_eval.md).
 - **Scope & Limitations of 20/20 Pass:** A 20/20 grounding pass demonstrates that the deterministic template memo stays strictly within its own governance rules. It does not evaluate real-LLM generation or real-world prompt synthesis.
-- **Empirical Evidence for Guardrails:** The ChaosLLM adversarial attack evaluation (Table below) and the 200 random memo corruptions test (100% block rate) constitute the primary empirical evidence for the grounding verifier and execution guardrails.
+- **Empirical Evidence for Guardrails:** The ChaosLLM adversarial attack evaluation (14 test vectors) and the 200 random memo corruptions test (100% block rate) constitute the primary empirical evidence for the grounding verifier and execution guardrails (see [docs/agent_eval.md](docs/agent_eval.md)).
+- **Token-Based Numeric Grounding Limitation:** Numeric grounding is token-based; an allowlisted number that is legitimate in one place (e.g. premiere year `2024`, episode count `16`, or a historical comparable release year) could theoretically be misplaced or misused in another sentence by a generative LLM without triggering a token allowlist rejection.
 - **MockLLM vs. Real LLM Injection Behavior:** MockLLM operates on structured JSON fields and never reads or processes unconstrained free-form text. The prompt injection control test proves that the feature-extraction pipeline treats synopses strictly as data embeddings, but says nothing about how a real generative LLM might react to prompt injection within its context window.
 - **LiveLLM Status:** `LiveLLM` is currently an offline disabled client that raises `NotImplementedError` when `LLM_PROVIDER != 'mock'`; it is not tested against external endpoints in this evaluation suite. Real-LLM behavior, model hallucination under fluid prompts, and injection through model context are deliberately out of scope and not evaluated.
 - **Uncovered Generative Risks & Static Blocklist Limitations:** Static keyword and regex guardrails cannot cover arbitrary paraphrase, claims without numbers, or persuasive tone / rhetoric; this fundamental limitation of static guardrails is the primary reason why production memos default deterministically to the template generator rather than unconstrained open-ended LLM generations.
 
 ##### 2. Chaos LLM Adversarial Test Double Verification
-An adversarial test double (`ChaosLLM`) subjected the orchestrator and grounding engine to 14 distinct failure modes. Every single adversarial attempt was successfully blocked:
-
-| Test Case | Adversarial Attack / Anomaly Mode | Orchestrator / Grounding Defense | Status |
-| :--- | :--- | :--- | :---: |
-| **Case (a)** | `unknown_tool`: Injects unknown tool call (`delete_all_files`) | Orchestrator plan validator rejects unknown tool; falls back to allowlisted tools | **BLOCKED (Yes)** |
-| **Case (b)** | `ten_calls`: Injects 10 repetitive tool calls | Orchestrator truncates execution plan to $\le 4$ calls | **BLOCKED (Yes)** |
-| **Case (c)** | `altered_pitch_field`: Injects altered argument (`country: USA`) | Orchestrator plan validator rejects altered arguments; enforces validated pitch | **BLOCKED (Yes)** |
-| **Case (d)** | `disallowed_lever`: Injects disallowed what-if lever (`episodes: 100`) | Orchestrator rejects what-if call; re-runs with valid levers only | **BLOCKED (Yes)** |
-| **Case (e)** | `omits_required_tools`: Plan omits `explain_pitch` and `find_comparables` | Orchestrator automatically injects mandatory tools | **BLOCKED (Yes)** |
-| **Case (f)** | `invented_percentage`: Memo invents ungrounded percentage (`"91%"`) | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (g1)** | `forbidden_phrase_guaranteed`: Memo promises certainty (`"guaranteed"`) | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (g2)** | `forbidden_phrase_revenue`: Memo projects commercial revenue (`"revenue"`) | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (g3)** | `forbidden_phrase_will_succeed`: Memo asserts certainty (`"will succeed"`) | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (h)** | `ungrounded_comparable_title`: Memo cites ungrounded comparable drama title | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (i)** | `talent_name_leak`: Memo leaks talent name from lookup (`"Kim Won-seok"`) | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (j)** | `synopsis_echo_6_words`: Memo echoes $\ge 6$ consecutive synopsis words | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (k)** | `missing_required_caveat`: Memo omits required retrieval caveat | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
-| **Case (l)** | `calibrated_probability_decimal`: Memo quotes continuous decimal (`"0.5833"`) | Grounding verifier rejects memo; falls back to template memo | **BLOCKED (Yes)** |
+An adversarial test double (`ChaosLLM`) subjected the orchestrator and grounding engine to 14 distinct failure modes across plan validation and grounding verification. Every adversarial attempt is systematically blocked (**14 / 14 (100.0%) block rate**). Complete test results, attack descriptions, and defense mechanisms are recorded in [docs/agent_eval.md](docs/agent_eval.md).
 
 ##### 3. Determinism, Injection Control & Robustness Testing
 - **Determinism Across Runs:** Executing the complete agent workflow across repeated runs yields **100% identical outputs** (0 byte difference).
 - **Prompt Injection Control:** Replacing prompt injection instructions in `pitch_11` with neutral synopsis text leaves **predictive sections 100% identical**.
-- **200 Random Memo Corruptions Test:** Applying 200 random mutations (inserting ungrounded percentages, omitting required caveats, altering titles, inserting forbidden commercial/certainty phrases, injecting calibrated probability decimals, word-form percentages like `"ninety percent"`, ratio expressions like `"9 out of 10"`, ungrounded numbers, or echoing synopsis text) yielded a **100.0% block rate (200/200 blocked)** by the grounding engine.
+- **200 Random Memo Corruptions Test:** Applying 200 random mutations (inserting ungrounded percentages, omitting required caveats, altering titles, inserting forbidden commercial/certainty phrases, injecting calibrated probability decimals, word-form percentages like `"ninety percent"`, ratio expressions like `"9 out of 10"`, ungrounded numbers, or echoing synopsis text) yielded a **100.0% block rate (200/200 blocked)** by the grounding engine (category breakdown recorded in [docs/agent_eval.md](docs/agent_eval.md)).
 
 ---
 
 #### Full Greenlight Memo Examples
-
-##### Memo 1: Standard Evaluation — Fixture 01 (`pitch_01_complete_kr_thriller`)
-```markdown
-### 1. What Was Assessed
-Production assessment for proposed drama originating in South Korea. Planned release schedule targets premiere on 2024-03-01 with 16 planned episodes; scheduled for broadcast on Friday, Saturday. Broadcaster listed as 'tvn', content rating '15+', and planned genres: Thriller, Mystery, Psychological. Individual creator names and narrative synopsis text are excluded from assessment.
-
-### 2. Likelihood Band & Historical Track Record
-Model-Assigned Likelihood Band: **Likely**
-Empirical benchmark: **57.8% [95% CI: 52.6%, 62.9%] (N=351; observed on test dramas released 2022-2025, relative to dramas of the same country and year)** among the 2,525 evaluated test dramas (released 2022-2025, 6+ episodes, all four countries) that the model placed in this band. High = the top quarter of MyDramaList watchers among dramas of the same country and release year.
-
-### 3. Main Predictive Drivers
-- **Top Positive Feature Groups:** `content_rating` (positive), `network` (positive), `genres` (positive).
-- **Top Negative Feature Groups:** None identified.
-- Country is a cohort baseline and planned episode count had little influence on this assessment.
-- Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment
-
-### 4. Advisory Warnings & Data Hygiene Alerts
-- *Alert:* No qualifying prior credits found within the 12-month rule. The model cannot distinguish a debut creator from an unlisted track record; prior reach is treated as unknown.
-
-### 5. Comparable Historical Dramas
-| Rank | Title | Release Year | Country | Broadcaster | Reach Tier | URL |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | Partners for Justice Season 2 (2019) | 2019 | South Korea | MBC | High | https://mydramalist.com/32917-partners-for-justice-2 |
-| 2 | Brother Disappeared (2017) | 2017 | South Korea | Naver TV Cast | Medium | https://mydramalist.com/21797-brother-disappeared |
-| 3 | Grid (2022) | 2022 | South Korea | Disney+ | Medium | https://mydramalist.com/690687-zero |
-
-> [!NOTE]
-> **Retrieval Scope Caveat:** comparables show similar premises; their tiers are not a probability for this pitch.
-
-### 6. Methodological Limitations & Governance Notice
-Forecasts and attributions reflect observational correlations from historical training data, not causal treatment effects, commercial earnings predictions, or performance guarantees. Actual audience reach is subject to script execution, marketing investments, competition, and platform scheduling.
-```
-
-##### Memo 2: What-If Sensitivity Simulation — Fixture 05 (`pitch_05_blank_network_and_rating`)
-```markdown
-### 1. What Was Assessed
-Production assessment for proposed drama originating in South Korea. Planned release schedule targets premiere on 2024-05-01 with 12 planned episodes; scheduled for broadcast on Wednesday, Thursday. Network not specified, content rating not specified, and planned genres: Crime, Action. Individual creator names and narrative synopsis text are excluded from assessment.
-
-### 2. Likelihood Band & Historical Track Record
-Model-Assigned Likelihood Band: **Unlikely**
-Empirical benchmark: **7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year)** among the 2,525 evaluated test dramas (released 2022-2025, 6+ episodes, all four countries) that the model placed in this band. High = the top quarter of MyDramaList watchers among dramas of the same country and release year.
-
-### 3. Main Predictive Drivers
-- **Top Positive Feature Groups:** None identified.
-- **Top Negative Feature Groups:** `genres` (negative), `network` (negative).
-- Country is a cohort baseline and planned episode count had little influence on this assessment.
-- Talent track record: no qualifying history found for the attached talent, so talent could not contribute to this assessment
-
-### 4. Advisory Warnings & Data Hygiene Alerts
-- *Alert:* Broadcaster network is not specified. The model predicts lower likelihood of the High tier when this field is left blank than when a typical broadcaster is attached; specify a network for an accurate assessment.
-- *Alert:* Content rating is not specified. The model predicts lower likelihood of the High tier when this field is left blank than when a typical rating is attached; specify a content rating if known.
-- *Alert:* No qualifying prior credits found within the 12-month rule. The model cannot distinguish a debut creator from an unlisted track record; prior reach is treated as unknown.
-
-### 5. Comparable Historical Dramas
-| Rank | Title | Release Year | Country | Broadcaster | Reach Tier | URL |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | Mouse (2021) | 2021 | South Korea | tvN | High | https://mydramalist.com/58953-mouse |
-| 2 | Cheo Yong Season 2 (2015) | 2015 | South Korea | OCN | Medium | https://mydramalist.com/13559-cheo-yong-2 |
-| 3 | Vampire Detective (2016) | 2016 | South Korea | OCN | High | https://mydramalist.com/9125-vampire-detective |
-
-> [!NOTE]
-> **Retrieval Scope Caveat:** comparables show similar premises; their tiers are not a probability for this pitch.
-
-### 6. Sensitivity Simulation (What-If Analysis)
-- **Attachment Changes Evaluated:** {"network": "jTBC", "content_rating": "15+"}
-
-| State | Likelihood Band | Empirical Benchmark (Observed Test Rate) |
-| :--- | :--- | :--- |
-| Before | Unlikely | 7.0% [95% CI: 5.8%, 8.4%] (N=1,436; observed on test dramas released 2022-2025, relative to dramas of the same country and year) |
-| After | Possible | 31.7% [95% CI: 27.9%, 35.8%] (N=527; observed on test dramas released 2022-2025, relative to dramas of the same country and year) |
-
-- **Blank-Field Effect:** Part of this change reflects the model's lower likelihood of the High tier when a field is blank; marginal and mode controls decompose this baseline lift. Modifications filled unlisted fields (network, content_rating). About two thirds of the raw gain comes from the fields being filled in rather than specific choices, reflecting the baseline statistical penalty for unlisted metadata in the training corpus.
-- **Calibration Step Alert:** band edges are approximate: the calibrator is a step function.
-
-> [!IMPORTANT]
-> **Sensitivity Caveat:** Results are associational, not causal; changing attachments does not guarantee audience reach shifts.
-
-### 7. Methodological Limitations & Governance Notice
-Forecasts and attributions reflect observational correlations from historical training data, not causal treatment effects, commercial earnings predictions, or performance guarantees. Actual audience reach is subject to script execution, marketing investments, competition, and platform scheduling.
-```
+Full executive decision memorandums generated deterministically by the orchestrator and verified by the grounding engine are preserved as golden reference files:
+- **Standard Assessment (Fixture 01):** [tests/golden/memo_01.md](tests/golden/memo_01.md) — Complete South Korean thriller with full metadata, verified driver attributions, and comparable titles.
+- **Sensitivity Simulation (Fixture 05):** [tests/golden/memo_05.md](tests/golden/memo_05.md) — What-if scenario evaluating attachment modifications (`Network: jTBC; Content rating: 15+`) with blank-field decomposition and calibration alert.
+- **Complete Evaluation Suite (All 20 Pitches):** Reference memorandums for all 20 test fixtures (`memo_01.md` through `memo_20.md`) are stored in [`tests/golden/`](tests/golden/).
 
 ---
 
 #### Integration Test Suite (`tests/test_agent.py`)
-All 50 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` in about one to five minutes depending on whether the embedding model is cached):
+All 51 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` in about one to five minutes depending on whether the embedding model is cached):
 1. `test_agent_normal_memo_passes_grounding`: Asserts verified generation of 6-section memo on standard pitch.
 2. `test_agent_what_if_normal_memo_passes_grounding`: Asserts verified generation of 7-section memo with what-if sensitivity table.
 3. `test_agent_determinism_across_runs`: Asserts byte-level determinism across repeated executions.
@@ -1042,13 +951,14 @@ All 50 unit and integration tests pass cleanly (`pytest tests/test_agent.py -v` 
 30-35. `test_grounding_word_percentages_and_ratios_blocked` (6 variants): Asserts word percentages and ratio expressions are rejected.
 36-44. `test_grounding_new_certainty_phrases_blocked` (9 phrases): Asserts newly extended commercial and certainty phrases are rejected.
 45. `test_grounding_general_numeric_check_blocked`: Asserts ungrounded numbers and years outside pitch and outputs are rejected.
-46. `test_golden_memos_regression`: Asserts all 5 golden reference memos match byte-for-byte with freshly generated orchestrator output.
-47. `test_pitch_14_unsupported_lever_in_sections_4_and_6`: Asserts unsupported-lever notice for pitch 14 is present in both Section 4 and Section 6.
-48. `test_canonical_network_display_names`: Asserts canonical network display casing (`tvN`, `Tencent Video`, `jTBC`), never lowercase matching keys.
-49. `test_pitch_16_episodes_null_warning_and_wording`: Asserts tool warning and memo wording when episodes is null.
-50. `test_fabricated_16_and_12_blocked_when_ungrounded`: Asserts fabricated "16" or "12" in a memo is blocked by grounding when not grounded.
+46. `test_golden_memos_regression`: Asserts all 20 golden reference memos match byte-for-byte with freshly generated orchestrator output.
+47. `test_readme_memo_excerpts_match_golden`: Asserts README contains markdown links to golden memos and docs/agent_eval.md, and contains no drifted memo excerpts.
+48. `test_pitch_14_unsupported_lever_in_sections_4_and_6`: Asserts unsupported-lever notice for pitch 14 is present in both Section 4 and Section 6.
+49. `test_canonical_network_display_names`: Asserts canonical network display casing (`tvN`, `Tencent Video`, `jTBC`), never lowercase matching keys.
+50. `test_pitch_16_episodes_null_warning_and_wording`: Asserts tool warning and memo wording when episodes is null.
+51. `test_fabricated_16_and_12_blocked_when_ungrounded`: Asserts fabricated "16" or "12" in a memo is blocked by grounding when not grounded.
 
-*(Total test suite across all modules: 109 tests passing: 50 in `test_agent.py`, 16 in `test_agent_tools.py`, 34 in `test_explain.py`, 9 in `test_retriever.py`).*
+*(Total test suite across all modules: 110 tests passing: 51 in `test_agent.py`, 16 in `test_agent_tools.py`, 34 in `test_explain.py`, 9 in `test_retriever.py`).*
 
 ---
 
@@ -1115,8 +1025,8 @@ All dataset processing and serialized model artifacts are generated through comm
 
 > [!IMPORTANT]
 > **Fresh-Clone Test Behavior & Artifact Guard:**
-> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 109 tests with clear skip indicators.
-> If `data/processed/` tables and models have been produced locally, executing `python src/build_artifacts.py` and `python src/build_retriever.py` regenerates all required artifacts. Running `pytest tests/ -v` then executes and passes all 109 unit and integration tests cleanly in about one to five minutes depending on whether the embedding model is cached (50 in `tests/test_agent.py`, 34 in `tests/test_explain.py`, 16 in `tests/test_agent_tools.py`, and 9 in `tests/test_retriever.py`).
+> When cloned fresh without serialized artifacts in `models/` or tables in `data/processed/`, running `pytest tests/ -v` automatically skips all 110 tests with clear skip indicators.
+> If `data/processed/` tables and models have been produced locally, executing `python src/build_artifacts.py` and `python src/build_retriever.py` regenerates all required artifacts. Running `pytest tests/ -v` then executes and passes all 110 unit and integration tests cleanly in about one to five minutes depending on whether the embedding model is cached (51 in `tests/test_agent.py`, 34 in `tests/test_explain.py`, 16 in `tests/test_agent_tools.py`, and 9 in `tests/test_retriever.py`).
 
 
 

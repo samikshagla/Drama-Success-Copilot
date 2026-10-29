@@ -489,7 +489,23 @@ def generate_template_memo(
             a_band = wi_quotable["after"]["likelihood_band"]
             a_rate = wi_quotable["after"]["observed_band_rate"]
 
-            lines.append(f"- **Attachment Changes Evaluated:** {json.dumps(wi_out.get('changes_applied', {}))}")
+            changes_applied = wi_out.get("changes_applied", {})
+            if changes_applied:
+                items = []
+                for k, v in changes_applied.items():
+                    label = k.replace("_", " ").capitalize()
+                    if k == "network" and isinstance(v, str):
+                        val_str = CANONICAL_NETWORKS_MAP.get(v.lower().strip(), v)
+                    elif isinstance(v, list):
+                        val_str = ", ".join(str(x) for x in v)
+                    else:
+                        val_str = str(v)
+                    items.append(f"{label}: {val_str}")
+                changes_str = "; ".join(items)
+            else:
+                changes_str = "None"
+
+            lines.append(f"- **Attachment Changes Evaluated:** {changes_str}")
             lines.append("")
             lines.append("| State | Likelihood Band | Empirical Benchmark (Observed Test Rate) |")
             lines.append("| :--- | :--- | :--- |")
@@ -502,7 +518,7 @@ def generate_template_memo(
             if share_stmt:
                 lines.append(
                     f"- **Blank-Field Effect:** Part of this change reflects the model's lower likelihood of the High tier "
-                    f"when a field is blank; marginal and mode controls decompose this baseline lift. {share_stmt}"
+                    f"when a field is blank; most of the lift comes from filling in the blank fields, not from the specific choices. {share_stmt}"
                 )
 
             if wi_out.get("band_boundary_warning"):
